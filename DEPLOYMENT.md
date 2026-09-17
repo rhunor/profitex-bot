@@ -299,13 +299,18 @@ on the spot and grant access immediately.
 What the daily cadence genuinely costs you: **an expired member may stay in the
 group for up to 24 hours** after their end date, until the morning pass. They get
 all three reminders beforehand, so it is not a surprise to them — but if you want
-removals within 15 minutes, do the next bit.
+removals within 30 minutes, do the next bit.
 
-#### Removals within 15 minutes, still free
+#### Removals within 30 minutes, still free
 
-The repo ships a GitHub Actions workflow that pings the same endpoint every 15
-minutes. It costs nothing, needs no third-party service, and the daily Vercel
-cron stays in place as a backstop.
+The repo ships a GitHub Actions workflow that pings the same endpoint every 30
+minutes, and the daily Vercel cron stays in place as a backstop.
+
+**Why 30 and not 15.** On a **private** repo, Actions minutes come out of the
+free 2,000/month and GitHub rounds every job up to a whole minute no matter how
+short it is. Every 30 minutes is ~1,440 minutes/month, inside the allowance;
+every 15 would be ~2,880 and would overrun it. On a **public** repo Actions are
+unlimited, so `*/15` is fine there.
 
 **Setup** — in your GitHub repo → **Settings** → **Secrets and variables** →
 **Actions** → **New repository secret**, add two:
@@ -539,7 +544,8 @@ so anyone who turns up without a subscription is removed automatically.
 | Paystack webhook rejected (401) | `PAYSTACK_SECRET_KEY` must be the *same* key (test vs live) as the dashboard that sent it. The signature is HMAC-SHA512 over the raw body. |
 | Flutterwave webhook rejected (401) | `FLUTTERWAVE_SECRET_HASH` does not match the dashboard's secret hash. |
 | Paid but no access | `/payments` in the bot shows the record. The maintenance pass reconciles any verified-but-unfulfilled payment automatically — run `/cron` to force it. |
-| Removals lag by up to a day on Vercel Hobby | Expected: Hobby cron fires once daily. Add the GitHub Actions scheduler for 15-minute passes — see [Option A](#option-a--vercel-hobby-plan). |
+| Removals lag by up to a day on Vercel Hobby | Expected: Hobby cron fires once daily. Add the GitHub Actions scheduler for 30-minute passes — see [Option A](#option-a--vercel-hobby-plan). |
+| GitHub Action fails: "recent account payments have failed or your spending limit needs to be increased" | GitHub billing, not the bot. Actions is blocked account-wide. Fix it under GitHub → Settings → Billing, or delete `.github/workflows/scheduler.yml` and use an external pinger. The bot keeps working on the daily Vercel cron either way. |
 | Cron endpoint returns but nothing happened | Check the JSON it returns: `report.hasMoreWork` and `chain` show whether a follow-up pass was started. `chain: "unconfigured"` means `PUBLIC_URL` or `CRON_SECRET` is missing on the host. |
 | Broadcast stalls half way | Its queue is persistent — it resumes on the next pass. Run `/cron`, or check the delivery summary. |
 | `MongooseServerSelectionError` | Atlas **Network Access** is not set to `0.0.0.0/0`, or the password is not URL-encoded. |
