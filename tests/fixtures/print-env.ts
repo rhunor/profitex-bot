@@ -24,6 +24,7 @@ try {
       onVercel: env.onVercel,
       groupConfigured: env.groupConfigured,
       groupChatId: env.GROUP_CHAT_ID,
+      communityType: env.COMMUNITY_TYPE,
     }),
   );
 } catch (error) {

@@ -125,12 +125,12 @@ groupHandlers.on('my_chat_member', async (ctx) => {
       );
     } else if (status !== 'administrator') {
       lines.push(
-        '\u26A0\uFE0F I am only a member. Make me an <b>admin</b> with',
-        '<b>Invite Users via Link</b> and <b>Ban Users</b> switched on.',
+        '\u26A0\uFE0F I am only a member. Make me an <b>admin</b> who can invite',
+        'users via link and remove members.',
       );
     } else {
       lines.push(
-        '\u2705 To make this the academy group, set this in Vercel',
+        `\u2705 To make this the academy ${chat.type === 'channel' ? 'channel' : 'group'}, set this in Vercel`,
         '\u2192 Settings \u2192 Environment Variables, then redeploy:',
         '',
         `<code>GROUP_CHAT_ID=${chat.id}</code>`,

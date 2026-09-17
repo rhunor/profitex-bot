@@ -213,4 +213,60 @@ export async function isInGroup(telegramId: number): Promise<boolean> {
   return ['creator', 'administrator', 'member', 'restricted'].includes(member.status);
 }
 
+export interface CommunityRightsReport {
+  ok: boolean;
+  chatType?: string;
+  title?: string;
+  /** Plain-language problems, empty when everything needed is in place. */
+  problems: string[];
+}
+
+/**
+ * Asks Telegram what the bot is actually allowed to do in the managed
+ * channel or group — the ground truth, rather than trusting that the right
+ * switches were flipped in the app.
+ */
+export async function checkCommunityRights(): Promise<CommunityRightsReport> {
+  const env = getEnv();
+  if (!env.groupConfigured) return { ok: false, problems: ['GROUP_CHAT_ID is not set yet.'] };
+
+  const api = getApi();
+  const problems: string[] = [];
+
+  let chatType: string | undefined;
+  let title: string | undefined;
+  try {
+    const chat = await api.getChat(env.GROUP_CHAT_ID);
+    chatType = chat.type;
+    title = 'title' in chat ? chat.title : undefined;
+    if (chat.type === 'group') {
+      problems.push('This is a basic group, which cannot have members removed. Convert it to a supergroup or use a channel.');
+    }
+    if ('username' in chat && chat.username) {
+      problems.push(`It is public (@${chat.username}), so anyone can join without paying. Make it private.`);
+    }
+  } catch (error) {
+    const reason = error instanceof GrammyError ? error.description : String(error);
+    return { ok: false, problems: [`Cannot see chat ${env.GROUP_CHAT_ID}: ${reason}. Is the bot an admin there?`] };
+  }
+
+  try {
+    const me = await api.getMe();
+    const member = await api.getChatMember(env.GROUP_CHAT_ID, me.id);
+    if (member.status !== 'administrator') {
+      problems.push(`The bot is "${member.status}", not an administrator.`);
+    } else {
+      if (!member.can_invite_users) problems.push('Missing the right to invite users via link (can_invite_users) — invite links cannot be created.');
+      if (!member.can_restrict_members) problems.push('Missing the right to ban/remove members (can_restrict_members) — expired subscribers cannot be removed.');
+      if (chatType === 'channel' && !member.can_post_messages) {
+        problems.push('Missing the right to post messages (can_post_messages) — /post will not work.');
+      }
+    }
+  } catch (error) {
+    problems.push(`Could not read the bot's rights: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  return { ok: problems.length === 0, chatType, title, problems };
+}
+
 export { isUnreachable };

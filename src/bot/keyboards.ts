@@ -2,7 +2,7 @@ import { InlineKeyboard, Keyboard } from 'grammy';
 import { formatMoney } from '../utils/money';
 import type { IPlan } from '../models';
 import type { PaymentGateway } from '../services/payments';
-import { planDuration } from './texts';
+import { community, planDuration } from './texts';
 
 /* Callback-data scheme (Telegram caps this at 64 bytes):
    plans | plan:<planId> | pay:<planId>:<gateway> | check:<reference>
@@ -77,7 +77,7 @@ export function checkoutKeyboard(checkoutUrl: string, reference: string): Inline
 }
 
 export function joinGroupKeyboard(inviteLink: string): InlineKeyboard {
-  return new InlineKeyboard().url('\u{1F680} Join the group', inviteLink);
+  return new InlineKeyboard().url(`\u{1F680} Join the ${community()}`, inviteLink);
 }
 
 export function renewKeyboard(): InlineKeyboard {
@@ -103,7 +103,7 @@ export function adminMenuKeyboard(): InlineKeyboard {
     .text('\u{1F9FE} Plans', 'adm:plans')
     .row()
     .text('\u{1F4E3} Broadcast', 'adm:bc')
-    .text('\u{1F4E2} Post to group', 'adm:post')
+    .text(`\u{1F4E2} Post to ${community()}`, 'adm:post')
     .row()
     .text('\u{1F50D} Find member', 'adm:find')
     .row();

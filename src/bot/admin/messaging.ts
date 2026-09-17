@@ -9,6 +9,7 @@ import { markUnreachable } from '../../services/user.service';
 import type { BotContext } from '../context';
 import { adminBackKeyboard, broadcastAudienceKeyboard, broadcastConfirmKeyboard, cancelKeyboard } from '../keyboards';
 import { render, reply } from '../helpers';
+import { community } from '../texts';
 
 const log = createLogger('admin:messaging');
 
@@ -128,7 +129,7 @@ export async function promptPostToGroup(ctx: BotContext): Promise<void> {
   await render(
     ctx,
     [
-      '\u{1F4E2} <b>Post to the group</b>',
+      `\u{1F4E2} <b>Post to the ${community()}</b>`,
       '',
       `Send the message you want posted in <b>${escapeHtml(getEnv().GROUP_NAME)}</b>.`,
       '',
@@ -146,12 +147,12 @@ export async function handlePostStep(ctx: BotContext): Promise<boolean> {
 
   const posted = await copyToGroup(ctx.chat.id, ctx.message.message_id);
   if (posted) {
-    recordActivity({ action: 'admin.post', actorTelegramId: ctx.from?.id, message: 'Posted to the group' });
-    await reply(ctx, '✅ Posted to the group.', adminBackKeyboard());
+    recordActivity({ action: 'admin.post', actorTelegramId: ctx.from?.id, message: `Posted to the ${community()}` });
+    await reply(ctx, `✅ Posted to the ${community()}.`, adminBackKeyboard());
   } else {
     await reply(
       ctx,
-      '⚠️ Could not post. Check that the bot is still an administrator in the group with permission to send messages.',
+      `⚠️ Could not post. Check that the bot is still an administrator in the ${community()} with permission to post messages.`,
       adminBackKeyboard(),
     );
   }

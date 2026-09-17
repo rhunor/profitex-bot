@@ -12,6 +12,7 @@ import { processBroadcastQueue } from '../services/broadcast.service';
 import { chainFollowUpPass } from '../services/dispatch';
 import { Plan, type Gateway } from '../models';
 import { seedIfCatalogueEmpty } from '../services/plan-seed';
+import { checkCommunityRights } from '../services/telegram';
 import { publicUrl } from '../config/env';
 
 const log = createLogger('http');
@@ -281,13 +282,16 @@ export function createApp(): Express {
       // First run on an empty database gets the starter plans; never touches existing ones.
       const seededPlans = await seedIfCatalogueEmpty();
 
+      const rights = env.groupConfigured ? await checkCommunityRights() : null;
+
       const info = await bot.api.getWebhookInfo();
       const activePlans = await Plan.countDocuments({ isActive: true });
 
       const todo: string[] = [];
       if (!env.TELEGRAM_WEBHOOK_SECRET) todo.push('Set TELEGRAM_WEBHOOK_SECRET, redeploy, and open this link again.');
       if (env.adminIds.size === 0) todo.push('Set ADMIN_TELEGRAM_IDS (your id from @userinfobot), redeploy, and open this link again.');
-      if (!env.groupConfigured) todo.push('Add the bot to the group as an admin. It will message you the GROUP_CHAT_ID to set.');
+      if (!env.groupConfigured) todo.push(`Add the bot to the ${env.COMMUNITY_TYPE} as an admin. It will message you the GROUP_CHAT_ID to set.`);
+      if (rights && !rights.ok) todo.push(...rights.problems);
       if (!env.paystackEnabled) todo.push('Set PAYSTACK_SECRET_KEY and redeploy.');
       if (activePlans === 0) todo.push('No active plans on sale. Re-activate or add one in the bot: /admin -> Plans.');
       if (seededPlans.length) todo.push('Starter plans were created at placeholder prices. Set real prices: /admin -> Plans.');
@@ -307,7 +311,9 @@ export function createApp(): Express {
                 lastError: info.last_error_message ?? null,
               },
               commandsPublishedForAdmins: env.adminIds.size,
-              groupConfigured: env.groupConfigured,
+              community: rights
+                ? { type: rights.chatType, title: rights.title, rightsOk: rights.ok }
+                : { configured: false, expectedType: env.COMMUNITY_TYPE },
               paystackConfigured: env.paystackEnabled,
               activePlans,
               seededPlans,

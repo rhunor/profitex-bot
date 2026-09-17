@@ -97,48 +97,18 @@ async function checkTelegram(env: ReturnType<typeof getEnv>): Promise<void> {
   }
 
   if (!env.groupConfigured) {
-    record('fail', 'Group', 'GROUP_CHAT_ID is not set. Add the bot to the group as an admin; it will message the admins the id.');
-    return;
-  }
-
-  try {
-    const chat = await api.getChat(env.GROUP_CHAT_ID);
-    const title = 'title' in chat ? chat.title : '(untitled)';
-
-    if (chat.type !== 'supergroup' && chat.type !== 'channel') {
-      record(
-        'fail',
-        'Group type',
-        `"${title}" is a ${chat.type}. Removing members needs a supergroup — enable chat history for new members, or convert the group.`,
-      );
+    record('fail', 'Community', `GROUP_CHAT_ID is not set. Add the bot to the ${env.COMMUNITY_TYPE} as an admin; it will message the admins the id.`);
+  } else {
+    const { checkCommunityRights } = await import('../src/services/telegram');
+    const rights = await checkCommunityRights();
+    if (rights.ok) {
+      record('pass', 'Community', `"${rights.title}" (${rights.chatType}) — bot is an admin with every right it needs.`);
     } else {
-      record('pass', 'Group', `Connected to "${title}" (${chat.type}, id ${env.GROUP_CHAT_ID})`);
+      record('fail', 'Community', rights.problems.join(' '));
     }
-  } catch (error) {
-    const message = error instanceof GrammyError ? error.description : String(error);
-    record('fail', 'Group', `Could not read GROUP_CHAT_ID ${env.GROUP_CHAT_ID}: ${message}`);
-    return;
-  }
-
-  try {
-    const member = await api.getChatMember(env.GROUP_CHAT_ID, botId);
-
-    if (member.status !== 'administrator') {
-      record('fail', 'Bot rights', `The bot is "${member.status}" in the group. It must be an administrator.`);
-      return;
+    if (rights.chatType && rights.chatType !== env.COMMUNITY_TYPE && rights.chatType !== 'supergroup') {
+      record('warn', 'Wording', `The chat is a ${rights.chatType} but COMMUNITY_TYPE=${env.COMMUNITY_TYPE}; messages will say "${env.COMMUNITY_TYPE}".`);
     }
-
-    const missing: string[] = [];
-    if (!member.can_invite_users) missing.push('Invite Users via Link');
-    if (!member.can_restrict_members) missing.push('Ban Users');
-
-    if (missing.length > 0) {
-      record('fail', 'Bot rights', `Administrator, but missing: ${missing.join(', ')}.`);
-    } else {
-      record('pass', 'Bot rights', 'Administrator with invite-link and ban permissions.');
-    }
-  } catch (error) {
-    record('fail', 'Bot rights', error instanceof Error ? error.message : String(error));
   }
 
   try {

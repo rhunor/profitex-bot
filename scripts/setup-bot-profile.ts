@@ -21,15 +21,18 @@ for (const file of ['.env.local', '.env']) {
   dotenv.config({ path: path.resolve(process.cwd(), file) });
 }
 
+/** "channel" or "group" — keep in step with COMMUNITY_TYPE in the environment. */
+const COMMUNITY = process.env.COMMUNITY_TYPE === 'group' ? 'group' : 'channel';
+
 /** Shown on the bot's profile page. Hard limit: 120 characters. */
 const SHORT_DESCRIPTION =
-  'Official subscription bot for Profitable Forex Trading Academy. Pay, join the group, and manage your access.';
+  `Official subscription bot for Profitable Forex Trading Academy. Pay, join the ${COMMUNITY}, and manage your access.`;
 
 /** Shown on the empty chat screen, before the user presses Start. Limit: 512. */
 const DESCRIPTION = [
   'Welcome to Profitable Forex Trading Academy.',
   '',
-  'This bot handles your access to our private signals and mentorship group.',
+  `This bot handles your access to our private signals and mentorship ${COMMUNITY}.`,
   '',
   // FLUTTERWAVE-DISABLED: restore to 'with Paystack or Flutterwave'
   '• Choose a plan and pay securely with Paystack',
@@ -58,7 +61,7 @@ const ADMIN_COMMANDS = [
   { command: 'grant', description: 'Grant or extend access' },
   { command: 'revoke', description: 'Revoke access' },
   { command: 'dm', description: 'Message one member' },
-  { command: 'post', description: 'Post to the group' },
+  { command: 'post', description: `Post to the ${COMMUNITY}` },
   { command: 'broadcast', description: 'Message many members' },
   { command: 'cron', description: 'Run the maintenance pass' },
 ];

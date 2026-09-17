@@ -138,7 +138,7 @@ export async function publishCommands(bot: Bot<BotContext>): Promise<void> {
           { command: 'grant', description: 'Grant or extend access' },
           { command: 'revoke', description: 'Revoke access' },
           { command: 'dm', description: 'Message one member' },
-          { command: 'post', description: 'Post to the group' },
+          { command: 'post', description: `Post to the ${texts.community()}` },
           { command: 'broadcast', description: 'Message many members' },
           { command: 'cron', description: 'Run the maintenance pass' },
         ],

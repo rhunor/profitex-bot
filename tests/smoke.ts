@@ -137,6 +137,12 @@ async function main(): Promise<void> {
     assert.equal(result.flutterwaveEnabled, false);
   });
 
+  await check('wording defaults to a channel, and can be switched to a group', () => {
+    assert.equal(parseEnvWith({}).communityType, 'channel');
+    assert.equal(parseEnvWith({ COMMUNITY_TYPE: 'group' }).communityType, 'group');
+    assert.equal(parseEnvWith({ COMMUNITY_TYPE: 'forum' }).ok, false, 'an unknown type must be refused');
+  });
+
   await check('the bot deploys before a group is connected', () => {
     const result = parseEnvWith({ GROUP_CHAT_ID: '' });
     assert.equal(result.ok, true, `config refused to load: ${result.message}`);

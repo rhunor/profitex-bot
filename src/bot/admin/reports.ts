@@ -7,6 +7,7 @@ import { getSubscriptionStats } from '../../services/subscription.service';
 import type { BotContext } from '../context';
 import { adminBackKeyboard, memberActionsKeyboard, paginationKeyboard } from '../keyboards';
 import { render } from '../helpers';
+import { community } from '../texts';
 
 const PAGE_SIZE = 8;
 
@@ -164,7 +165,7 @@ export async function showMemberCard(ctx: BotContext, telegramId: number): Promi
     user.username ? `@${escapeHtml(user.username)}` : '',
     `Telegram id: <code>${telegramId}</code>`,
     user.email ? `Email: ${escapeHtml(user.email)}` : '',
-    `In group: <b>${user.inGroup ? 'yes' : 'no'}</b>`,
+    `In ${community()}: <b>${user.inGroup ? 'yes' : 'no'}</b>`,
     user.hasBlockedBot ? '⚠️ <i>Has blocked the bot</i>' : '',
     '',
   ].filter(Boolean);

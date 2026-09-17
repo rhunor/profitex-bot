@@ -15,6 +15,7 @@ import { notifyAccessGranted } from '../../services/notify.service';
 import type { BotContext } from '../context';
 import { adminBackKeyboard, cancelKeyboard } from '../keyboards';
 import { render, reply } from '../helpers';
+import { community } from '../texts';
 import { showMemberCard } from './reports';
 
 export async function promptFindMember(ctx: BotContext): Promise<void> {
@@ -173,7 +174,7 @@ export async function revokeAccess(ctx: BotContext, telegramId: number): Promise
     [
       '⚠️ <b>Your access has been revoked</b>',
       '',
-      'An administrator has ended your access to the group. If you think this is a mistake, please reply here.',
+      `An administrator has ended your access to the ${community()}. If you think this is a mistake, please reply here.`,
     ].join('\n'),
   );
 
@@ -183,7 +184,7 @@ export async function revokeAccess(ctx: BotContext, telegramId: number): Promise
       '\u{1F6AB} <b>Access revoked</b>',
       '',
       `Member: <code>${telegramId}</code>`,
-      removal.ok ? 'Removed from the group.' : `⚠️ Group removal failed: ${escapeHtml(removal.error ?? '')}`,
+      removal.ok ? `Removed from the ${community()}.` : `⚠️ Removal failed: ${escapeHtml(removal.error ?? '')}`,
       subscription ? 'Subscription marked as revoked.' : 'No active subscription was on record.',
     ].join('\n'),
     adminBackKeyboard(),

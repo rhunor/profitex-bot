@@ -4,6 +4,11 @@ import { escapeHtml } from '../utils/text';
 import { formatDate, humaniseRemaining } from '../utils/time';
 import type { IPlan, ISubscription } from '../models';
 
+/** "channel" or "group", matching COMMUNITY_TYPE. */
+export function community(): string {
+  return getEnv().COMMUNITY_TYPE;
+}
+
 /* All copy lives here so wording can be changed without touching flow logic.
    Everything is written for Telegram's HTML parse mode. */
 
@@ -198,7 +203,7 @@ export function reminder3Day(subscription: ISubscription): string {
     '',
     `Your access ends on <b>${escapeHtml(formatDate(subscription.expiresAt))}</b>.`,
     '',
-    'After that you will be removed from the group automatically. Renew below to stay in.',
+    `After that you will be removed from the ${community()} automatically. Renew below to stay in.`,
   ].join('\n');
 }
 
@@ -208,7 +213,7 @@ export function reminder24Hour(subscription: ISubscription): string {
     '',
     `Your subscription ends on <b>${escapeHtml(formatDate(subscription.expiresAt))}</b>.`,
     '',
-    'Unless you renew, you will be removed from the group tomorrow. Renewing takes two taps.',
+    `Unless you renew, you will be removed from the ${community()} tomorrow. Renewing takes two taps.`,
   ].join('\n');
 }
 
@@ -253,9 +258,9 @@ export function groupWelcome(firstName: string): string {
     `\u{1F389} Welcome to <b>${escapeHtml(env.GROUP_NAME)}</b>, ${escapeHtml(firstName)}!`,
     '',
     '<b>House rules</b>',
-    '1. No sharing of signals or content outside this group.',
-    '2. No promotion, spam or referral links.',
-    '3. Trade responsibly — signals are educational, not financial advice.',
+    `1. No sharing of signals or content outside this ${community()}.`,
+    ...(community() === 'group' ? ['2. No promotion, spam or referral links.'] : []),
+    `${community() === 'group' ? '3' : '2'}. Trade responsibly — signals are educational, not financial advice.`,
     '',
     'Use /status in this bot at any time to see when your access expires.',
   ].join('\n');

@@ -6,6 +6,7 @@ import { runScheduledWork } from '../../jobs/scheduler';
 import { requireAdmin } from '../middlewares';
 import type { BotContext } from '../context';
 import { adminBackKeyboard, adminMenuKeyboard } from '../keyboards';
+import { community } from '../texts';
 import { clearStep, render, reply, toast } from '../helpers';
 import { showMemberCard, showMembers, showPayments, showStats } from './reports';
 import { handlePlanStep, promptPlanAdd, promptPlanField, showPlanAdmin, showPlanEditor, togglePlan } from './plans';
@@ -43,7 +44,7 @@ async function showAdminMenu(ctx: BotContext): Promise<void> {
       '/grant &lt;id&gt; &lt;plan|days&gt; — give or extend access',
       '/revoke &lt;id&gt; — end access now',
       '/dm &lt;id&gt; &lt;message&gt; — message one person',
-      '/post &lt;message&gt; — post in the group',
+      `/post &lt;message&gt; — post in the ${community()}`,
       '/broadcast — message many members',
       '/cron — run the expiry pass now',
     ].join('\n'),
@@ -163,7 +164,7 @@ admin.command('post', async (ctx) => {
     ? await copyToGroup(ctx.chat!.id, replied.message_id)
     : (await sendMessageSafe(getEnv().GROUP_CHAT_ID, escapeHtml(text))).ok;
 
-  await reply(ctx, posted ? '✅ Posted to the group.' : '⚠️ Could not post to the group.');
+  await reply(ctx, posted ? `✅ Posted to the ${community()}.` : `⚠️ Could not post to the ${community()}.`);
 });
 
 admin.command('broadcast', async (ctx) => {

@@ -54,6 +54,12 @@ const schema = z.object({
    */
   GROUP_CHAT_ID: z.coerce.number().int().optional(),
   GROUP_NAME: z.string().default('Profitable Forex Trading Academy'),
+  /**
+   * What GROUP_CHAT_ID points at. Only changes wording ("join the channel" vs
+   * "join the group") and which admin rights are checked — access control
+   * works identically for both.
+   */
+  COMMUNITY_TYPE: z.enum(['channel', 'group']).default('channel'),
   BRAND_NAME: z.string().default('Profitex'),
   SUPPORT_USERNAME: z.string().optional(),
 
