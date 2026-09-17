@@ -1,0 +1,49 @@
+{
+  "name": "profitex-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Profitex — Profitable Forex Trading Academy Telegram subscription bot",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "dev": "cross-env NODE_ENV=development tsx watch src/index.ts",
+    "seed": "tsx scripts/seed.ts",
+    "set-webhook": "tsx scripts/set-webhook.ts",
+    "delete-webhook": "tsx scripts/set-webhook.ts --delete",
+    "doctor": "tsx scripts/doctor.ts",
+    "find-group-id": "tsx scripts/find-group-id.ts",
+    "setup-bot": "tsx scripts/setup-bot-profile.ts",
+    "cron": "tsx scripts/run-cron.ts",
+    "simulate-expiry": "tsx scripts/simulate-expiry.ts",
+    "test": "npm run test:smoke && npm run test:integration",
+    "test:smoke": "tsx tests/smoke.ts",
+    "test:integration": "tsx tests/integration.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "grammy": "^1.46.0",
+    "mongoose": "^9.10.1",
+    "node-cron": "^4.6.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.23",
+    "@types/node": "^22.10.5",
+    "cross-env": "^7.0.3",
+    "mongodb-memory-server": "^10.4.3",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "mongodb-memory-server@10.4.3": true
+  }
+}

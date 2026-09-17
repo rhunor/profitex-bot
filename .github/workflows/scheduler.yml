@@ -1,0 +1,47 @@
+# Runs the bot's maintenance pass (reminders, expiry removals, payment
+# reconciliation, broadcast queue) every 15 minutes, for free.
+#
+# Why this exists: Vercel's Hobby plan caps cron jobs at once per day. The
+# vercel.json cron still runs as a daily backstop; this workflow is what makes
+# removals and reminders prompt.
+#
+# Setup — repository Settings → Secrets and variables → Actions → New secret:
+#   PROFITEX_PUBLIC_URL   https://your-project.vercel.app   (no trailing slash)
+#   PROFITEX_CRON_SECRET  the same value as CRON_SECRET on Vercel
+#
+# Note: GitHub schedules are best-effort and can be delayed under load, and
+# scheduled workflows are paused after 60 days with no repository activity.
+# Re-enable from the Actions tab if that happens.
+name: Scheduler
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: profitex-scheduler
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Maintenance pass
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger /api/cron/run
+        env:
+          PUBLIC_URL: ${{ secrets.PROFITEX_PUBLIC_URL }}
+          CRON_SECRET: ${{ secrets.PROFITEX_CRON_SECRET }}
+        run: |
+          if [ -z "$PUBLIC_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::PROFITEX_PUBLIC_URL and PROFITEX_CRON_SECRET must both be set as repository secrets."
+            exit 1
+          fi
+
+          response=$(curl --silent --show-error --fail-with-body \
+            --max-time 120 \
+            --request POST "${PUBLIC_URL}/api/cron/run" \
+            --header "x-cron-secret: ${CRON_SECRET}")
+
+          echo "$response" | python3 -m json.tool || echo "$response"

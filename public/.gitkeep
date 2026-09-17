@@ -1,0 +1,2 @@
+# Intentionally empty. Vercel expects a static output directory even for a
+# functions-only project; everything real is served by api/index.ts.

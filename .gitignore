@@ -1,0 +1,23 @@
+# ── Environment files — every form, never committed ──────────
+# Deliberately includes .env.example: this project keeps the full
+# variable reference in DEPLOYMENT.md instead, so nothing is lost.
+.env
+.env.*
+*.env
+.env.local
+.env.example
+
+# ── Dependencies and build output ────────────────────────────
+node_modules/
+dist/
+.vercel/
+*.tsbuildinfo
+
+# ── Logs and local noise ─────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+coverage/
+tmp/
