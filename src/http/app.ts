@@ -13,7 +13,7 @@ import { chainFollowUpPass } from '../services/dispatch';
 import { Plan, type Gateway } from '../models';
 import { seedIfCatalogueEmpty } from '../services/plan-seed';
 import { checkCommunityRights } from '../services/telegram';
-import { lookupMembership, verifyTrialSourceAccess } from '../services/mtproto';
+import { diagnoseLookup, lookupMembership, verifyTrialSourceAccess } from '../services/mtproto';
 import { publicUrl } from '../config/env';
 
 const log = createLogger('http');
@@ -317,6 +317,10 @@ export function createApp(): Express {
           ...(access.ok ? {} : { error: access.reason }),
         };
         const checkUser = Number(firstQueryValue(req.query.checkUser));
+        if (Number.isInteger(checkUser) && checkUser > 0) {
+          // Step-by-step, so a failure names the exact step and Telegram's error.
+          freeMonth.diagnosis = await diagnoseLookup(env.TRIAL_SOURCE_CHAT_ID, checkUser);
+        }
         if (access.ok && Number.isInteger(checkUser) && checkUser > 0) {
           const membership = await lookupMembership(env.TRIAL_SOURCE_CHAT_ID, checkUser);
           const joinedAt = membership.status === 'member' ? membership.joinedAt : null;

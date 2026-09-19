@@ -977,6 +977,101 @@ async function main(): Promise<void> {
     assert.doesNotMatch(texts.reminder7Day(paidSub), /free month/i);
   });
 
+  section('Full-API lookup against a simulated Telegram');
+
+  const mtproto = await import('../src/services/mtproto');
+  const { Api } = await import('telegram');
+  const bigInt = (await import('big-integer')).default;
+  const { AppSetting } = await import('../src/models/AppSetting');
+
+  const GROUP = -1002182527223;
+  const GROUP_ID = bigInt('2182527223');
+  const REAL_HASH = bigInt('987654321');
+  const calls: string[] = [];
+
+  // Behaves like the real server: a zero channel hash is refused for
+  // getParticipant (the production failure), but accepted by getChannels,
+  // which hands back the real hash.
+  const telegram = {
+    channelHash: REAL_HASH,
+    minChannel: false,
+    members: new Map<number, number>([[950001, Date.UTC(2026, 7, 10) / 1000]]),
+    async invoke(request: { className: string } & Record<string, any>) {
+      calls.push(request.className);
+      if (request.className === 'channels.GetChannels') {
+        return {
+          chats: [new Api.Channel({ id: GROUP_ID, accessHash: this.channelHash, title: 'Profitable FX Trading Academy',
+            photo: new Api.ChatPhotoEmpty(), date: 0, min: this.minChannel })],
+        };
+      }
+      if (request.className === 'users.GetUsers') {
+        const id = request.id[0].userId;
+        return [new Api.User({ id, accessHash: bigInt(111), firstName: 'x' })];
+      }
+      if (request.className === 'channels.GetParticipant') {
+        if (!request.channel.accessHash.equals(this.channelHash)) throw Object.assign(new Error('x'), { errorMessage: 'CHANNEL_INVALID' });
+        if (request.participant.accessHash.isZero()) throw Object.assign(new Error('x'), { errorMessage: 'PARTICIPANT_ID_INVALID' });
+        const joined = this.members.get(Number(request.participant.userId));
+        if (!joined) throw Object.assign(new Error('x'), { errorMessage: 'USER_NOT_PARTICIPANT' });
+        return { participant: new Api.ChannelParticipant({ userId: request.participant.userId, date: joined }) };
+      }
+      throw new Error(`unexpected ${request.className}`);
+    },
+  };
+  mtproto.setTestClient({ client: telegram, api: Api });
+
+  await check('the group\'s real access hash is fetched first, then used for the lookup', async () => {
+    await AppSetting.deleteMany({});
+    calls.length = 0;
+    const result = await mtproto.lookupMembership(GROUP, 950001);
+    assert.equal(result.status, 'member');
+    assert.equal((result as { joinedAt: Date }).joinedAt.toISOString(), '2026-08-10T00:00:00.000Z');
+    assert.ok(calls.indexOf('channels.GetChannels') < calls.indexOf('channels.GetParticipant'));
+  });
+
+  await check('the access hash is remembered, so later lookups skip that step', async () => {
+    calls.length = 0;
+    await mtproto.lookupMembership(GROUP, 950001);
+    assert.equal(calls.includes('channels.GetChannels'), false);
+  });
+
+  await check('a stale remembered hash is replaced automatically', async () => {
+    telegram.channelHash = bigInt('555'); // e.g. the bot was removed and re-added
+    const result = await mtproto.lookupMembership(GROUP, 950001);
+    assert.equal(result.status, 'member');
+    telegram.channelHash = REAL_HASH;
+    await AppSetting.deleteMany({});
+  });
+
+  await check('a real non-member is reported as not a member', async () => {
+    assert.deepEqual(await mtproto.lookupMembership(GROUP, 950099), { status: 'not_member' });
+  });
+
+  await check('a partial ("min") channel is a clear error, never a silent "not a member"', async () => {
+    await AppSetting.deleteMany({});
+    telegram.minChannel = true;
+    const result = await mtproto.lookupMembership(GROUP, 950001);
+    assert.equal(result.status, 'error');
+    telegram.minChannel = false;
+  });
+
+  await check('a key problem with the person is an error that alerts admins, not "not a member"', async () => {
+    const realInvoke = telegram.invoke.bind(telegram);
+    telegram.invoke = async (request: { className: string } & Record<string, any>) =>
+      request.className === 'users.GetUsers' ? [] : realInvoke(request); // person unresolvable -> zero hash
+    const result = await mtproto.lookupMembership(GROUP, 950001);
+    telegram.invoke = realInvoke;
+    assert.deepEqual(result, { status: 'error', reason: 'PARTICIPANT_ID_INVALID' });
+  });
+
+  await check('the step-by-step diagnosis names each stage', async () => {
+    const steps = await mtproto.diagnoseLookup(GROUP, 950001);
+    assert.deepEqual(steps.map((s) => s.ok), [true, true, true, true]);
+    assert.match(steps[3].detail, /joined 2026-08-10/);
+  });
+
+  mtproto.setTestClient(null);
+
   section('Plan seeding from the setup link');
 
   await check('an existing catalogue is left completely alone', async () => {

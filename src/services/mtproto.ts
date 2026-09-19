@@ -74,7 +74,14 @@ async function loadGramJs() {
   return { Api, TelegramClient, Logger, LogLevel, StringSession };
 }
 
-async function withClient<T>(work: (client: TelegramClient, api: typeof Api) => Promise<T>): Promise<T> {
+/** Test hook: run `work` against a stand-in client instead of Telegram. */
+let testClient: { client: TelegramClient; api: GramApi } | null = null;
+export function setTestClient(stub: { client: unknown; api: unknown } | null): void {
+  testClient = stub as typeof testClient;
+}
+
+async function withClient<T>(work: (client: TelegramClient, api: GramApi) => Promise<T>): Promise<T> {
+  if (testClient) return work(testClient.client, testClient.api);
   const env = getEnv();
   const { Api, TelegramClient, Logger, LogLevel, StringSession } = await loadGramJs();
   if (!env.TELEGRAM_API_ID || !env.TELEGRAM_API_HASH) {
@@ -123,35 +130,104 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+const channelHashKey = (chatId: number) => `mtproto_channel_hash:${chatId}`;
+
+type GramApi = typeof Api;
+
+function rpcMessage(error: unknown): string {
+  return (error as { errorMessage?: string }).errorMessage ?? (error instanceof Error ? error.message : String(error));
+}
+
+/**
+ * Turns a Bot API chat id into an InputChannel carrying the channel's *real*
+ * access hash.
+ *
+ * A fresh full-API session has never "seen" the channel, so it holds no access
+ * hash. Sending a zero hash straight to channels.getParticipant is rejected
+ * with CHANNEL_INVALID. Instead, ask for the channel itself with a zero hash —
+ * the route Telegram documents for bots — which returns the full hash, then
+ * use that. The hash is stable, so it is stored and fetched only once.
+ */
+async function resolveChannel(
+  client: TelegramClient,
+  api: GramApi,
+  chatId: number,
+  options: { useCache?: boolean } = {},
+): Promise<Api.InputChannel> {
+  const channelId = toMtprotoChannelId(chatId);
+  const useCache = options.useCache !== false;
+
+  if (useCache) {
+    const cached = await readSetting(channelHashKey(chatId));
+    if (cached) return new api.InputChannel({ channelId, accessHash: bigInt(cached) });
+  }
+
+  const result = await client.invoke(
+    new api.channels.GetChannels({ id: [new api.InputChannel({ channelId, accessHash: bigInt.zero })] }),
+  );
+  const channel = result.chats.find(
+    (chat): chat is Api.Channel => chat.className === 'Channel' && chat.id.equals(channelId),
+  );
+  if (!channel) throw new Error('Telegram did not return the channel. Is the bot a member of it?');
+  if (channel.min || !channel.accessHash) {
+    throw new Error('Telegram returned only a partial ("min") channel, with no usable access hash.');
+  }
+
+  if (useCache) await writeSetting(channelHashKey(chatId), channel.accessHash.toString());
+  return new api.InputChannel({ channelId, accessHash: channel.accessHash });
+}
+
+/** Same idea for the person: fetch them with a zero hash to learn their real one. */
+async function resolveUser(client: TelegramClient, api: GramApi, userId: number): Promise<Api.InputPeerUser> {
+  const users = await client.invoke(
+    new api.users.GetUsers({ id: [new api.InputUser({ userId: bigInt(userId), accessHash: bigInt.zero })] }),
+  );
+  const user = users.find((u): u is Api.User => u.className === 'User' && u.id.equals(bigInt(userId)));
+  if (!user || user.min || !user.accessHash) {
+    // Fall back to the zero hash; getParticipant will say clearly if that fails.
+    return new api.InputPeerUser({ userId: bigInt(userId), accessHash: bigInt.zero });
+  }
+  return new api.InputPeerUser({ userId: user.id, accessHash: user.accessHash });
+}
+
+async function getParticipant(client: TelegramClient, api: GramApi, chatId: number, userId: number) {
+  const participant = await resolveUser(client, api, userId);
+  try {
+    const channel = await resolveChannel(client, api, chatId);
+    return await client.invoke(new api.channels.GetParticipant({ channel, participant }));
+  } catch (error) {
+    // A stored hash can go stale (e.g. the bot was removed and re-added).
+    // Forget it and try once more with a freshly fetched one.
+    if (rpcMessage(error) === 'CHANNEL_INVALID') {
+      await writeSetting(channelHashKey(chatId), '');
+      const channel = await resolveChannel(client, api, chatId, { useCache: false });
+      await writeSetting(channelHashKey(chatId), channel.accessHash.toString());
+      return client.invoke(new api.channels.GetParticipant({ channel, participant }));
+    }
+    throw error;
+  }
+}
+
 /**
  * Is `userId` in `chatId`, and since when?
  *
  * Uses `channels.getParticipant`, which fetches one member rather than listing
  * them, so Telegram's ~200-subscriber listing cap on channels does not apply.
- * Both ids use a zero access hash, which is what Telegram tells bots to do when
- * they hold no full access hash (core.telegram.org/api/peers).
  */
 export async function lookupMembership(chatId: number, userId: number): Promise<Membership> {
   try {
     return await withTimeout(
-      withClient(async (client, Api) => {
-        const result = await client.invoke(
-          new Api.channels.GetParticipant({
-            channel: new Api.InputChannel({ channelId: toMtprotoChannelId(chatId), accessHash: bigInt.zero }),
-            participant: new Api.InputPeerUser({ userId: bigInt(userId), accessHash: bigInt.zero }),
-          }),
-        );
-        return interpretParticipant(result.participant);
-      }),
+      withClient(async (client, api) => interpretParticipant((await getParticipant(client, api, chatId, userId)).participant)),
       LOOKUP_TIMEOUT_MS,
     );
   } catch (error) {
-    const message = (error as { errorMessage?: string }).errorMessage ?? (error instanceof Error ? error.message : String(error));
+    const message = rpcMessage(error);
 
-    // Telegram's way of saying "this person is not in that chat".
-    if (message === 'USER_NOT_PARTICIPANT' || message === 'PARTICIPANT_ID_INVALID') {
-      return { status: 'not_member' };
-    }
+    // Only this error means "not in the chat". Anything else — including
+    // PARTICIPANT_ID_INVALID, which a bad access hash can also cause — is a
+    // failure of the lookup, and must alert the admins rather than quietly
+    // turning an eligible member away.
+    if (message === 'USER_NOT_PARTICIPANT') return { status: 'not_member' };
 
     log.error('Membership lookup failed', { chatId, userId, message });
     return { status: 'error', reason: message };
@@ -162,19 +238,83 @@ export async function lookupMembership(chatId: number, userId: number): Promise<
 export async function verifyTrialSourceAccess(chatId: number): Promise<{ ok: boolean; title?: string; reason?: string }> {
   try {
     return await withTimeout(
-      withClient(async (client, Api) => {
-        const result = await client.invoke(
-          new Api.channels.GetChannels({
-            id: [new Api.InputChannel({ channelId: toMtprotoChannelId(chatId), accessHash: bigInt.zero })],
-          }),
-        );
+      withClient(async (client, api) => {
+        const channel = await resolveChannel(client, api, chatId);
+        const result = await client.invoke(new api.channels.GetChannels({ id: [channel] }));
         const chat = result.chats[0] as { title?: string } | undefined;
         return { ok: true, title: chat?.title };
       }),
       LOOKUP_TIMEOUT_MS,
     );
   } catch (error) {
-    const message = (error as { errorMessage?: string }).errorMessage ?? (error instanceof Error ? error.message : String(error));
-    return { ok: false, reason: message };
+    return { ok: false, reason: rpcMessage(error) };
   }
+}
+
+export interface DiagnosisStep {
+  step: string;
+  ok: boolean;
+  detail: string;
+}
+
+/**
+ * Runs the lookup one step at a time and reports each, so a failure on the live
+ * deployment says exactly where and why — no guessing, no redeploy loops.
+ * Read-only: grants nothing, and bypasses the stored channel hash.
+ */
+export async function diagnoseLookup(chatId: number, userId?: number): Promise<DiagnosisStep[]> {
+  const steps: DiagnosisStep[] = [];
+  try {
+    await withTimeout(
+      withClient(async (client, api) => {
+        steps.push({ step: 'sign in to the full API as the bot', ok: true, detail: 'signed in' });
+
+        let channel: Api.InputChannel;
+        try {
+          channel = await resolveChannel(client, api, chatId, { useCache: false });
+          steps.push({ step: 'fetch the group and its access hash', ok: true, detail: 'full access hash received' });
+        } catch (error) {
+          steps.push({ step: 'fetch the group and its access hash', ok: false, detail: rpcMessage(error) });
+          return;
+        }
+
+        if (!userId) return;
+
+        const participant = await resolveUser(client, api, userId).catch((error) => {
+          steps.push({ step: 'fetch the person', ok: false, detail: rpcMessage(error) });
+          return null;
+        });
+        if (!participant) return;
+        steps.push({
+          step: 'fetch the person',
+          ok: true,
+          detail: participant.accessHash.isZero() ? 'no full access hash; trying with zero' : 'full access hash received',
+        });
+
+        try {
+          const result = await client.invoke(new api.channels.GetParticipant({ channel, participant }));
+          const membership = interpretParticipant(result.participant);
+          steps.push({
+            step: 'read their membership',
+            ok: true,
+            detail:
+              membership.status === 'member'
+                ? `member (${membership.role}), joined ${membership.joinedAt ? membership.joinedAt.toISOString() : 'no date (creator)'}`
+                : membership.status,
+          });
+        } catch (error) {
+          const message = rpcMessage(error);
+          steps.push({
+            step: 'read their membership',
+            ok: message === 'USER_NOT_PARTICIPANT',
+            detail: message === 'USER_NOT_PARTICIPANT' ? 'not a member of the group' : message,
+          });
+        }
+      }),
+      LOOKUP_TIMEOUT_MS,
+    );
+  } catch (error) {
+    steps.push({ step: steps.length ? 'lookup' : 'sign in to the full API as the bot', ok: false, detail: rpcMessage(error) });
+  }
+  return steps;
 }
