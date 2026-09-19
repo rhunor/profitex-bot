@@ -13,6 +13,7 @@ import { chainFollowUpPass } from '../services/dispatch';
 import { Plan, type Gateway } from '../models';
 import { seedIfCatalogueEmpty } from '../services/plan-seed';
 import { checkCommunityRights } from '../services/telegram';
+import { lookupMembership, verifyTrialSourceAccess } from '../services/mtproto';
 import { publicUrl } from '../config/env';
 
 const log = createLogger('http');
@@ -295,6 +296,40 @@ export function createApp(): Express {
 
       const rights = env.groupConfigured ? await checkCommunityRights() : null;
 
+      // Free month: prove the full-API sign-in works and the source is visible.
+      // `?checkUser=<telegram id>` additionally looks one person up, read-only.
+      const trialVars = {
+        TRIAL_SOURCE_CHAT_ID: env.TRIAL_SOURCE_CHAT_ID,
+        TRIAL_ELIGIBLE_FROM: env.TRIAL_ELIGIBLE_FROM,
+        TELEGRAM_API_ID: env.TELEGRAM_API_ID,
+        TELEGRAM_API_HASH: env.TELEGRAM_API_HASH,
+      };
+      const missingTrialVars = Object.entries(trialVars).filter(([, v]) => !v).map(([k]) => k);
+      let freeMonth: Record<string, unknown> = { enabled: false };
+      if (env.trialEnabled && env.TRIAL_SOURCE_CHAT_ID) {
+        const access = await verifyTrialSourceAccess(env.TRIAL_SOURCE_CHAT_ID);
+        freeMonth = {
+          enabled: true,
+          source: access.ok ? access.title : null,
+          sourceReachable: access.ok,
+          eligibleIfJoinedOnOrAfter: env.trialEligibleFrom?.toISOString(),
+          days: env.TRIAL_DAYS,
+          ...(access.ok ? {} : { error: access.reason }),
+        };
+        const checkUser = Number(firstQueryValue(req.query.checkUser));
+        if (access.ok && Number.isInteger(checkUser) && checkUser > 0) {
+          const membership = await lookupMembership(env.TRIAL_SOURCE_CHAT_ID, checkUser);
+          const joinedAt = membership.status === 'member' ? membership.joinedAt : null;
+          freeMonth.checkUser = {
+            telegramId: checkUser,
+            ...membership,
+            wouldQualify: Boolean(joinedAt && env.trialEligibleFrom && joinedAt >= env.trialEligibleFrom),
+          };
+        }
+      } else if (missingTrialVars.length < 4) {
+        freeMonth = { enabled: false, missing: missingTrialVars };
+      }
+
       const info = await bot.api.getWebhookInfo();
       const activePlans = await Plan.countDocuments({ isActive: true });
 
@@ -304,6 +339,12 @@ export function createApp(): Express {
       if (!env.groupConfigured) todo.push(`Add the bot to the ${env.COMMUNITY_TYPE} as an admin. It will message you the GROUP_CHAT_ID to set.`);
       if (rights && !rights.ok) todo.push(...rights.problems);
       if (!env.paystackEnabled) todo.push('Set PAYSTACK_SECRET_KEY and redeploy.');
+      if (missingTrialVars.length > 0 && missingTrialVars.length < 4) {
+        todo.push(`Free month is half set up. Still missing: ${missingTrialVars.join(', ')}.`);
+      }
+      if (freeMonth.enabled && !freeMonth.sourceReachable) {
+        todo.push(`Free month: cannot read the source community (${String(freeMonth.error)}). Is the bot an admin there?`);
+      }
       if (activePlans === 0) todo.push('No active plans on sale. Re-activate or add one in the bot: /admin -> Plans.');
       if (seededPlans.length) todo.push('Starter plans were created at placeholder prices. Set real prices: /admin -> Plans.');
 
@@ -328,6 +369,7 @@ export function createApp(): Express {
               paystackConfigured: env.paystackEnabled,
               activePlans,
               seededPlans,
+              freeMonth,
               stillToDo: todo.length ? todo : ['Nothing. Send /start to the bot.'],
             },
             null,

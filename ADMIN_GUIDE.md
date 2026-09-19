@@ -27,6 +27,16 @@ You do nothing. If they never pay, they never get a link.
 
 Each reminder is sent once. If they renew, the remaining reminders stop.
 
+## Free month for community members
+
+People who joined the partner community on or after the cutoff date get one
+free month the first time they open the bot — automatically, with their own
+invite link. Their month starts when they join the channel. They get the same
+7-day, 3-day and 24-hour reminders, then they are asked to subscribe.
+
+Each person gets it **once**. Anyone who joined before the cutoff sees the
+normal paid plans.
+
 ---
 
 ## The admin menu

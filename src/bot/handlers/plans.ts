@@ -17,11 +17,18 @@ import {
 } from '../keyboards';
 import * as texts from '../texts';
 import { clearStep, render, reply, toast } from '../helpers';
+import { offerTrialIfEligible } from './trial';
 
 const log = createLogger('bot:plans');
 export const planHandlers = new Composer<BotContext>();
 
 export async function showPlans(ctx: BotContext): Promise<void> {
+  try {
+    if (await offerTrialIfEligible(ctx)) return;
+  } catch (error) {
+    log.error('Free-month offer failed; showing plans instead', error);
+  }
+
   const plans = await Plan.find({ isActive: true }).sort({ sortOrder: 1, priceMinor: 1 });
 
   if (plans.length === 0) {

@@ -7,3 +7,4 @@ export * from './InviteLink';
 export * from './Broadcast';
 export * from './SessionStore';
 export * from './ActivityLog';
+export * from './AppSetting';

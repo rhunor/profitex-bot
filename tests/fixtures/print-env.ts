@@ -25,6 +25,7 @@ try {
       groupConfigured: env.groupConfigured,
       groupChatId: env.GROUP_CHAT_ID,
       communityType: env.COMMUNITY_TYPE,
+      trialEnabled: env.trialEnabled,
     }),
   );
 } catch (error) {

@@ -181,6 +181,62 @@ async function main(): Promise<void> {
     assert.match(String(result.message), /negative/i);
   });
 
+  console.log('\nFree month configuration');
+
+  await check('the free month is off until all four settings are present', () => {
+    assert.equal(parseEnvWith({}).trialEnabled, false);
+    const partial = parseEnvWith({ TRIAL_SOURCE_CHAT_ID: '-1009999999999', TRIAL_ELIGIBLE_FROM: '2026-08-01T00:00:00+01:00' });
+    assert.equal(partial.ok, true);
+    assert.equal(partial.trialEnabled, false, 'without the API id/hash it must stay off');
+    const full = parseEnvWith({
+      TRIAL_SOURCE_CHAT_ID: '-1009999999999',
+      TRIAL_ELIGIBLE_FROM: '2026-08-01T00:00:00+01:00',
+      TELEGRAM_API_ID: '12345',
+      TELEGRAM_API_HASH: 'abc',
+    });
+    assert.equal(full.trialEnabled, true);
+  });
+
+  await check('a malformed cutoff date is refused', () => {
+    const result = parseEnvWith({ TRIAL_ELIGIBLE_FROM: '1st August' });
+    assert.equal(result.ok, false);
+    assert.match(String(result.message), /TRIAL_ELIGIBLE_FROM/);
+  });
+
+  await check('the free-month source cannot be the paid channel itself', () => {
+    const result = parseEnvWith({ TRIAL_SOURCE_CHAT_ID: '-1001234567890' });
+    assert.equal(result.ok, false);
+    assert.match(String(result.message), /different chat/);
+  });
+
+  console.log('\nFull-API membership lookup');
+  const { toMtprotoChannelId, interpretParticipant } = await import('../src/services/mtproto');
+  const { Api } = await import('telegram');
+  const bigInt = (await import('big-integer')).default;
+
+  await check('Bot API channel ids map onto full-API channel ids', () => {
+    assert.equal(toMtprotoChannelId(-1001234567890).toString(), '1234567890');
+    assert.throws(() => toMtprotoChannelId(-123456), /not a channel or supergroup/);
+  });
+
+  await check('a member is read with their exact join date', () => {
+    const joined = Date.UTC(2026, 7, 5, 10) / 1000;
+    const result = interpretParticipant(new Api.ChannelParticipant({ userId: bigInt(1), date: joined }));
+    assert.deepEqual(result, { status: 'member', joinedAt: new Date(joined * 1000), role: 'member' });
+  });
+
+  await check('left and banned people are not members', () => {
+    const left = interpretParticipant(new Api.ChannelParticipantLeft({ peer: new Api.PeerUser({ userId: bigInt(1) }) }));
+    assert.deepEqual(left, { status: 'not_member' });
+  });
+
+  await check('the creator is a member with no join date', () => {
+    const creator = interpretParticipant(
+      new Api.ChannelParticipantCreator({ userId: bigInt(1), adminRights: new Api.ChatAdminRights({}) }),
+    );
+    assert.deepEqual(creator, { status: 'member', joinedAt: null, role: 'creator' });
+  });
+
   console.log('\nMoney (minor units)');
   await check('converts without floating point drift', () => {
     assert.equal(toMinor(25_000), 2_500_000);

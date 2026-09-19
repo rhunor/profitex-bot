@@ -6,6 +6,7 @@ import type { BotContext } from '../context';
 import { CB, mainMenuKeyboard, persistentMenu } from '../keyboards';
 import * as texts from '../texts';
 import { clearStep, render, reply } from '../helpers';
+import { offerTrialIfEligible } from './trial';
 
 const log = createLogger('bot:start');
 export const startHandlers = new Composer<BotContext>();
@@ -46,6 +47,16 @@ startHandlers.command('start', async (ctx) => {
       await reply(ctx, texts.genericError());
       return;
     }
+  }
+
+  // Members of the partner community get their free month instead of a sales pitch.
+  try {
+    if (await offerTrialIfEligible(ctx)) {
+      await ctx.reply('Use the menu below any time.', { reply_markup: persistentMenu() });
+      return;
+    }
+  } catch (error) {
+    log.error('Free-month offer failed; falling back to the normal welcome', error);
   }
 
   await ctx.reply(texts.welcome(ctx.from?.first_name), {

@@ -114,6 +114,12 @@ async function main(): Promise<void> {
     INVITE_LINK_TTL_MINUTES: '60',
     BROADCAST_RATE_PER_SEC: '30',
     BROADCAST_BUDGET_MS: '10000',
+    // Free month: joined the source community on/after 1 Aug 2026, Lagos time.
+    TRIAL_SOURCE_CHAT_ID: '-1009999999999',
+    TRIAL_ELIGIBLE_FROM: '2026-08-01T00:00:00+01:00',
+    TRIAL_DAYS: '30',
+    TELEGRAM_API_ID: '12345',
+    TELEGRAM_API_HASH: 'test-api-hash',
   });
 
   installGatewayStub();
@@ -800,6 +806,175 @@ async function main(): Promise<void> {
     const report = await processBroadcastQueue(3000);
     assert.equal(report.sent, 0);
     assert.equal(callsTo('copyMessage').length, before);
+  });
+
+  section('Free month for members of the partner community');
+
+  const trial = await import('../src/services/trial.service');
+  const texts = await import('../src/bot/texts');
+  const CUTOFF = new Date('2026-08-01T00:00:00+01:00');
+
+  // What Telegram "says" about each person, keyed by telegram id.
+  const membershipBook = new Map<number, unknown>();
+  let lookups = 0;
+  trial.setMembershipLookupForTests(async (chatId, userId) => {
+    lookups += 1;
+    assert.equal(chatId, -1009999999999, 'must query the source community, not the paid channel');
+    return (membershipBook.get(userId) ?? { status: 'not_member' }) as never;
+  });
+  const member = (joinedAt: Date | null, role = 'member') => ({ status: 'member', joinedAt, role });
+
+  await check('someone who joined after 1 August qualifies', async () => {
+    membershipBook.set(940001, member(new Date('2026-08-05T10:00:00Z')));
+    const user = await upsertUser({ id: 940001, first_name: 'Aug' });
+    const result = await trial.checkTrialEligibility(user);
+    assert.equal(result.verdict, 'eligible');
+  });
+
+  await check('granting creates a 30-day free subscription with an invite link', async () => {
+    const user = (await User.findOne({ telegramId: 940001 }))!;
+    const grant = await trial.grantTrial(user, new Date('2026-08-05T10:00:00Z'));
+    assert.ok(grant, 'grant should succeed');
+    assert.equal(grant!.extendedExisting, false);
+    assert.equal(grant!.subscription.source, 'trial');
+    assert.equal(grant!.subscription.planSnapshot.priceMinor, 0);
+    const days = (grant!.subscription.expiresAt.getTime() - Date.now()) / DAY;
+    assert.ok(days > 29.9 && days < 30.1, `expected ~30 days, got ${days}`);
+    assert.ok(grant!.inviteLink, 'an invite link must be issued');
+    assert.ok((await User.findOne({ telegramId: 940001 }))!.trialClaimedAt);
+  });
+
+  await check('the free month can only ever be claimed once', async () => {
+    const user = (await User.findOne({ telegramId: 940001 }))!;
+    assert.equal((await trial.checkTrialEligibility(user)).verdict, 'already_claimed');
+    assert.equal(await trial.grantTrial(user, null), null);
+    assert.equal(await Subscription.countDocuments({ telegramId: 940001 }), 1);
+  });
+
+  await check('two simultaneous claims produce exactly one free month', async () => {
+    membershipBook.set(940002, member(new Date('2026-09-01T00:00:00Z')));
+    const user = await upsertUser({ id: 940002, first_name: 'Race' });
+    const [a, b, c] = await Promise.all([
+      trial.grantTrial(user, null),
+      trial.grantTrial(user, null),
+      trial.grantTrial(user, null),
+    ]);
+    assert.equal([a, b, c].filter(Boolean).length, 1);
+    assert.equal(await Subscription.countDocuments({ telegramId: 940002 }), 1);
+  });
+
+  await check('someone who joined before 1 August does not qualify', async () => {
+    membershipBook.set(940003, member(new Date('2026-07-20T00:00:00Z')));
+    const user = await upsertUser({ id: 940003, first_name: 'July' });
+    assert.equal((await trial.checkTrialEligibility(user)).verdict, 'joined_too_early');
+  });
+
+  await check('the cutoff is exact, in Lagos time', async () => {
+    membershipBook.set(940004, member(CUTOFF));
+    membershipBook.set(940005, member(new Date(CUTOFF.getTime() - 1000)));
+    const onTheDot = await upsertUser({ id: 940004, first_name: 'OnTime' });
+    const oneSecondEarly = await upsertUser({ id: 940005, first_name: 'Early' });
+    assert.equal((await trial.checkTrialEligibility(onTheDot)).verdict, 'eligible');
+    assert.equal((await trial.checkTrialEligibility(oneSecondEarly)).verdict, 'joined_too_early');
+    // 00:00 Lagos is 23:00 UTC the day before.
+    assert.equal(CUTOFF.toISOString(), '2026-07-31T23:00:00.000Z');
+  });
+
+  await check('someone who joins the partner community in future still qualifies', async () => {
+    membershipBook.set(940006, member(new Date('2027-02-14T09:00:00Z')));
+    const user = await upsertUser({ id: 940006, first_name: 'Future' });
+    assert.equal((await trial.checkTrialEligibility(user, new Date('2027-02-15T00:00:00Z'))).verdict, 'eligible');
+  });
+
+  await check('a non-member does not qualify, and is not re-queried every tap', async () => {
+    const user = await upsertUser({ id: 940007, first_name: 'Outsider' });
+    const before = lookups;
+    const now = new Date();
+    assert.equal((await trial.checkTrialEligibility(user, now)).verdict, 'not_member');
+    const cached = (await User.findOne({ telegramId: 940007 }))!;
+    assert.equal((await trial.checkTrialEligibility(cached, new Date(now.getTime() + 60_000))).verdict, 'not_member');
+    assert.equal(lookups, before + 1, 'the second check within 15 minutes must use the cache');
+  });
+
+  await check('someone who joins the partner community later is recognised once the cache lapses', async () => {
+    const now = new Date();
+    membershipBook.set(940007, member(new Date()));
+    const cached = (await User.findOne({ telegramId: 940007 }))!;
+    const later = new Date(now.getTime() + 16 * 60_000);
+    assert.equal((await trial.checkTrialEligibility(cached, later)).verdict, 'eligible');
+  });
+
+  await check('a failed lookup is not cached against the person', async () => {
+    membershipBook.set(940008, { status: 'error', reason: 'CHAT_ADMIN_REQUIRED' });
+    const user = await upsertUser({ id: 940008, first_name: 'Glitch' });
+    const result = await trial.checkTrialEligibility(user);
+    assert.equal(result.verdict, 'lookup_failed');
+    assert.equal(result.reason, 'CHAT_ADMIN_REQUIRED');
+    assert.equal((await User.findOne({ telegramId: 940008 }))!.trialCheck?.result, undefined);
+  });
+
+  await check('the partner community creator has no join date and does not qualify', async () => {
+    membershipBook.set(940009, member(null, 'creator'));
+    const user = await upsertUser({ id: 940009, first_name: 'Owner' });
+    assert.equal((await trial.checkTrialEligibility(user)).verdict, 'joined_too_early');
+  });
+
+  await check('the free month counts from the day they join, not the day they claim', async () => {
+    membershipBook.set(940010, member(new Date('2026-09-10T00:00:00Z')));
+    const user = await upsertUser({ id: 940010, first_name: 'Slow' });
+    await trial.grantTrial(user, null);
+
+    const joinedPaidChannel = new Date(Date.now() + 3 * DAY);
+    const started = await trial.startTrialClockOnJoin(940010, joinedPaidChannel);
+    assert.ok(started);
+    assert.equal(started!.expiresAt.getTime(), addDays(joinedPaidChannel, 30).getTime());
+
+    // Leaving and rejoining must not restart it.
+    assert.equal(await trial.startTrialClockOnJoin(940010, new Date(Date.now() + 10 * DAY)), null);
+  });
+
+  await check('a paying member who qualifies gets 30 days added, and stays a paying member', async () => {
+    membershipBook.set(940011, member(new Date('2026-08-20T00:00:00Z')));
+    const user = await upsertUser({ id: 940011, first_name: 'Payer' });
+    const { subscription: paid } = await activateOrExtend({
+      user,
+      planSnapshot: snapshotFromPlan(monthly),
+      planId: monthly._id as never,
+      source: 'payment',
+    });
+    const paidUntil = paid.expiresAt;
+
+    const grant = await trial.grantTrial(user, null);
+    assert.equal(grant!.extendedExisting, true);
+    assert.equal(grant!.subscription.source, 'payment');
+    const added = (grant!.subscription.expiresAt.getTime() - paidUntil.getTime()) / DAY;
+    assert.ok(added > 29.9 && added < 30.1, `expected +30 days, got ${added}`);
+    // Not a trial, so joining the channel must not reset their paid clock.
+    assert.equal(await trial.startTrialClockOnJoin(940011, new Date()), null);
+  });
+
+  await check('paying during the free month adds a month on top of it', async () => {
+    const user = (await User.findOne({ telegramId: 940001 }))!;
+    const before = (await getActiveSubscription(940001))!.expiresAt;
+    const { subscription } = await activateOrExtend({
+      user,
+      planSnapshot: snapshotFromPlan(monthly),
+      planId: monthly._id as never,
+      source: 'payment',
+    });
+    const added = (subscription.expiresAt.getTime() - before.getTime()) / DAY;
+    assert.ok(added > 29.9 && added < 30.1);
+    assert.equal(subscription.source, 'payment', 'once paid, it is no longer a trial');
+  });
+
+  await check('free-month reminders and removal speak about the free month', async () => {
+    const trialSub = (await getActiveSubscription(940002))!;
+    assert.match(texts.reminder7Day(trialSub), /free month/i);
+    assert.match(texts.reminder3Day(trialSub), /free month/i);
+    assert.match(texts.reminder24Hour(trialSub), /free month/i);
+    assert.match(texts.removalNotice(trialSub), /free month/i);
+    const paidSub = (await getActiveSubscription(900001))!;
+    assert.doesNotMatch(texts.reminder7Day(paidSub), /free month/i);
   });
 
   section('Plan seeding from the setup link');

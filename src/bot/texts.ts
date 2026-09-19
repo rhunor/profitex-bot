@@ -186,8 +186,19 @@ export function subscriptionStatus(subscription: ISubscription): string {
   return lines.join('\n');
 }
 
+const onTrial = (s: ISubscription) => s.source === 'trial';
+
 export function reminder7Day(subscription: ISubscription): string {
   const env = getEnv();
+  if (onTrial(subscription)) {
+    return [
+      '\u{1F514} <b>Your free month ends in 7 days</b>',
+      '',
+      `Your free access to <b>${escapeHtml(env.GROUP_NAME)}</b> runs until <b>${escapeHtml(formatDate(subscription.expiresAt))}</b>.`,
+      '',
+      'Subscribe now to keep your place — any days left on your free month are added on top.',
+    ].join('\n');
+  }
   return [
     '\u{1F514} <b>Your subscription ends in 7 days</b>',
     '',
@@ -198,6 +209,15 @@ export function reminder7Day(subscription: ISubscription): string {
 }
 
 export function reminder3Day(subscription: ISubscription): string {
+  if (onTrial(subscription)) {
+    return [
+      '\u23F3 <b>3 days left on your free month</b>',
+      '',
+      `Your free access ends on <b>${escapeHtml(formatDate(subscription.expiresAt))}</b>.`,
+      '',
+      `After that you will be removed from the ${community()} unless you subscribe.`,
+    ].join('\n');
+  }
   return [
     '⏳ <b>3 days left</b>',
     '',
@@ -208,6 +228,15 @@ export function reminder3Day(subscription: ISubscription): string {
 }
 
 export function reminder24Hour(subscription: ISubscription): string {
+  if (onTrial(subscription)) {
+    return [
+      '\u{1F6A8} <b>Your free month ends tomorrow</b>',
+      '',
+      `Free access ends on <b>${escapeHtml(formatDate(subscription.expiresAt))}</b>.`,
+      '',
+      `Subscribe now to stay in the ${community()} — it takes two taps.`,
+    ].join('\n');
+  }
   return [
     '\u{1F6A8} <b>Final notice — 24 hours left</b>',
     '',
@@ -219,6 +248,15 @@ export function reminder24Hour(subscription: ISubscription): string {
 
 export function removalNotice(subscription: ISubscription): string {
   const env = getEnv();
+  if (onTrial(subscription)) {
+    return [
+      '\u{1F44B} <b>Your free month has ended</b>',
+      '',
+      `We hope you enjoyed <b>${escapeHtml(env.GROUP_NAME)}</b>. Your free access ended on <b>${escapeHtml(formatDate(subscription.expiresAt))}</b>, so you have been removed from the ${community()}.`,
+      '',
+      'Subscribe below and you will get a fresh invite link straight away.',
+    ].join('\n');
+  }
   return [
     '\u{1F44B} <b>Your access has ended</b>',
     '',
@@ -226,6 +264,40 @@ export function removalNotice(subscription: ISubscription): string {
     '',
     'You are welcome back any time — pay again below and you will get a fresh invite link straight away.',
   ].join('\n');
+}
+
+export function trialGranted(params: { days: number; linkTtlMinutes: number; hasLink: boolean }): string {
+  const env = getEnv();
+  const lines = [
+    '\u{1F381} <b>Good news \u2014 you qualify for free access!</b>',
+    '',
+    `As a member of our community, you get <b>${params.days} days free</b> in <b>${escapeHtml(env.GROUP_NAME)}</b>.`,
+    '',
+    `Your free month starts the moment you join the ${community()} \u2014 so there is no rush, you will not lose any days.`,
+    'We will remind you before it ends, and you can subscribe any time to stay on.',
+  ];
+  if (params.hasLink) {
+    lines.push(
+      '',
+      `\u26A0\uFE0F Your link works <b>once</b> and expires in <b>${params.linkTtlMinutes} minutes</b>. If it runs out, send /link for a new one.`,
+    );
+  } else {
+    lines.push('', 'Send /link to get your invite link.');
+  }
+  return lines.join('\n');
+}
+
+export function trialAddedToExisting(expiresAt: Date, days: number): string {
+  return [
+    '\u{1F381} <b>A free month, on us</b>',
+    '',
+    `As a member of our community, we have added <b>${days} free days</b> to your access.`,
+    `You are now covered until <b>${escapeHtml(formatDate(expiresAt))}</b>.`,
+  ].join('\n');
+}
+
+export function trialClockStarted(expiresAt: Date): string {
+  return `\u23F1 Your free month has started. It runs until <b>${escapeHtml(formatDate(expiresAt))}</b>.`;
 }
 
 export function helpText(): string {

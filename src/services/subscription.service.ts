@@ -36,7 +36,7 @@ export interface ActivationInput {
   planId?: Types.ObjectId;
   durationDays?: number;
   paymentReference?: string;
-  source?: 'payment' | 'manual';
+  source?: 'payment' | 'manual' | 'trial';
   notes?: string;
 }
 

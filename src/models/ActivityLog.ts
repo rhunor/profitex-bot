@@ -9,6 +9,8 @@ export type ActivityAction =
   | 'subscription.expired'
   | 'subscription.revoked'
   | 'subscription.granted'
+  | 'trial.granted'
+  | 'trial.clock_started'
   | 'invite.issued'
   | 'invite.used'
   | 'invite.revoked'

@@ -29,7 +29,12 @@ export interface ISubscription extends Document {
   removalNoticeSentAt?: Date;
   removedFromGroupAt?: Date;
   lastPaymentReference?: string;
-  source: 'payment' | 'manual';
+  source: 'payment' | 'manual' | 'trial';
+  /**
+   * For a free month: set when the clock is restarted from the moment the
+   * subscriber actually joins, so claiming early never costs them days.
+   */
+  trialClockStartedAt?: Date;
   renewalCount: number;
   notes?: string;
   createdAt: Date;
@@ -60,7 +65,8 @@ const subscriptionSchema = new Schema<ISubscription>(
     removalNoticeSentAt: { type: Date },
     removedFromGroupAt: { type: Date },
     lastPaymentReference: { type: String },
-    source: { type: String, enum: ['payment', 'manual'], default: 'payment' },
+    source: { type: String, enum: ['payment', 'manual', 'trial'], default: 'payment' },
+    trialClockStartedAt: { type: Date },
     renewalCount: { type: Number, default: 0 },
     notes: { type: String },
   },

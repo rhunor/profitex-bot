@@ -490,6 +490,46 @@ so anyone who turns up without a subscription is removed automatically.
 
 ---
 
+## Free month for members of another community
+
+Anyone who joined a second channel or group (the "source") on or after a cutoff
+date gets one free month the first time they message the bot. It is optional:
+it stays off until all four settings below are present.
+
+**How it decides.** When someone opens the bot, it asks Telegram when that
+person joined the source community. The Bot API has no join dates, so this one
+lookup uses Telegram's full API, signed in *as the bot* — no personal account.
+It looks up one person at a time, so Telegram's ~200-subscriber limit on
+*listing* channel members does not apply.
+
+**Rules.** Joined on or after `TRIAL_ELIGIBLE_FROM` and still a member → free
+month, once per person, ever. People who join the source community later also
+qualify. The month counts from when they actually **join the paid channel**, not
+from when they claim it. Someone already paying gets the days added on top.
+The bot never posts in, or removes anyone from, the source community.
+
+**Setup.**
+1. Add the bot to the source community as an admin (minimal rights). It will
+   message you the id to use.
+2. At [my.telegram.org](https://my.telegram.org) → **API development tools**,
+   create an app (any name) for an api id and hash.
+3. In Vercel add, then redeploy:
+
+   ```
+   TRIAL_SOURCE_CHAT_ID=<id the bot sent you>
+   TRIAL_ELIGIBLE_FROM=2026-08-01T00:00:00+01:00
+   TRIAL_DAYS=30
+   TELEGRAM_API_ID=<from my.telegram.org>
+   TELEGRAM_API_HASH=<from my.telegram.org>
+   ```
+
+4. Open the setup link. `freeMonth.sourceReachable` must be `true`. To test one
+   real person without granting anything, add `&checkUser=<their telegram id>`.
+
+If lookups start failing (for example the bot lost its admin rights in the
+source community), admins get a Telegram message at most once an hour, and
+members are shown the normal paid plans in the meantime.
+
 ## Environment variables
 
 > **Every `.env*` file is git-ignored**, including `.env.example`. Nothing
@@ -522,6 +562,10 @@ so anyone who turns up without a subscription is removed automatically.
 | `APP_TIMEZONE` | | Default `Africa/Lagos` — affects displayed dates |
 | `INVITE_LINK_TTL_MINUTES` | | Default `60` |
 | `BROADCAST_RATE_PER_SEC` | | Default `20`. Do not exceed 30 |
+| `TRIAL_SOURCE_CHAT_ID` | free month | Negative id of the community whose members qualify |
+| `TRIAL_ELIGIBLE_FROM` | free month | ISO timestamp with offset, e.g. `2026-08-01T00:00:00+01:00` |
+| `TRIAL_DAYS` | | Default `30` |
+| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | free month | From my.telegram.org. Used only to read join dates |
 | `ENFORCE_PAID_MEMBERS_ONLY` | | `true` kicks anyone who joins without a subscription |
 
 ---

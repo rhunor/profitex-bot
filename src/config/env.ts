@@ -65,6 +65,21 @@ const schema = z.object({
 
   ADMIN_TELEGRAM_IDS: csvNumbers,
 
+  /* ── Free month for members of another community ─────────────────────────
+     Anyone who joined TRIAL_SOURCE_CHAT_ID on or after TRIAL_ELIGIBLE_FROM gets
+     one free month the first time they message the bot. Reading a member's join
+     date needs Telegram's full API, hence the api id/hash from my.telegram.org.
+     The feature is off unless all four of these are set. */
+  TRIAL_SOURCE_CHAT_ID: z.coerce.number().int().optional(),
+  /** ISO timestamp, e.g. 2026-08-01T00:00:00+01:00 (midnight, Lagos time). */
+  TRIAL_ELIGIBLE_FROM: z
+    .string()
+    .optional()
+    .refine((v) => v === undefined || !Number.isNaN(Date.parse(v)), 'must be an ISO date, e.g. 2026-08-01T00:00:00+01:00'),
+  TRIAL_DAYS: z.coerce.number().int().positive().max(365).default(30),
+  TELEGRAM_API_ID: z.coerce.number().int().positive().optional(),
+  TELEGRAM_API_HASH: z.string().optional(),
+
   PAYSTACK_SECRET_KEY: z.string().optional(),
   FLUTTERWAVE_SECRET_KEY: z.string().optional(),
   /** The "secret hash" configured on the Flutterwave dashboard webhook settings. */
@@ -103,6 +118,10 @@ export type AppEnv = Omit<z.infer<typeof schema>, 'GROUP_CHAT_ID'> & {
   groupConfigured: boolean;
   /** Running as a Vercel function (Vercel sets VERCEL=1 on every deployment). */
   onVercel: boolean;
+  /** All four free-month settings are present. */
+  trialEnabled: boolean;
+  /** Parsed TRIAL_ELIGIBLE_FROM. */
+  trialEligibleFrom: Date | null;
   paystackEnabled: boolean;
   flutterwaveEnabled: boolean;
   adminIds: Set<number>;
@@ -173,6 +192,17 @@ function build(): AppEnv {
   if (value.BOT_MODE === 'webhook' && !value.PUBLIC_URL) {
     throw new Error('PUBLIC_URL is required when BOT_MODE=webhook.');
   }
+  if (value.TRIAL_SOURCE_CHAT_ID !== undefined && value.TRIAL_SOURCE_CHAT_ID >= 0) {
+    throw new Error('TRIAL_SOURCE_CHAT_ID must be the negative id of the channel or group, e.g. -1001234567890.');
+  }
+  if (value.TRIAL_SOURCE_CHAT_ID !== undefined && value.TRIAL_SOURCE_CHAT_ID === value.GROUP_CHAT_ID) {
+    throw new Error('TRIAL_SOURCE_CHAT_ID must be a different chat from GROUP_CHAT_ID (the paid channel).');
+  }
+  const trialEligibleFrom = value.TRIAL_ELIGIBLE_FROM ? new Date(value.TRIAL_ELIGIBLE_FROM) : null;
+  const trialEnabled = Boolean(
+    value.TRIAL_SOURCE_CHAT_ID && trialEligibleFrom && value.TELEGRAM_API_ID && value.TELEGRAM_API_HASH,
+  );
+
   if (value.GROUP_CHAT_ID !== undefined && value.GROUP_CHAT_ID >= 0) {
     throw new Error('GROUP_CHAT_ID must be the negative id of a supergroup, e.g. -1001234567890.');
   }
@@ -182,6 +212,8 @@ function build(): AppEnv {
     GROUP_CHAT_ID: value.GROUP_CHAT_ID ?? 0,
     groupConfigured: value.GROUP_CHAT_ID !== undefined,
     onVercel,
+    trialEnabled,
+    trialEligibleFrom,
     paystackEnabled,
     flutterwaveEnabled,
     adminIds: new Set(value.ADMIN_TELEGRAM_IDS),

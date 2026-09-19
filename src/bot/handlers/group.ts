@@ -7,6 +7,7 @@ import { markLinkUsed } from '../../services/invite.service';
 import { setGroupMembership } from '../../services/user.service';
 import { removeMemberFromGroup, sendMessageSafe } from '../../services/telegram';
 import { notifyAdmins, notifyUnauthorisedRemoval } from '../../services/notify.service';
+import { startTrialClockOnJoin } from '../../services/trial.service';
 import { escapeHtml } from '../../utils/text';
 import type { BotContext } from '../context';
 import * as texts from '../texts';
@@ -91,8 +92,14 @@ groupHandlers.on('chat_member', async (ctx) => {
 
   recordActivity({ action: 'member.joined', telegramId, message: 'Joined with an active subscription' });
 
+  // A free month counts from this moment, not from when it was claimed.
+  const trialStarted = await startTrialClockOnJoin(telegramId, new Date(update.date * 1000));
+
   // Welcome in DM rather than the group, so the group stays signal-only.
   await sendMessageSafe(telegramId, texts.groupWelcome(member.user.first_name ?? 'trader'));
+  if (trialStarted) {
+    await sendMessageSafe(telegramId, texts.trialClockStarted(trialStarted.expiresAt));
+  }
 });
 
 /** Keeps the local record straight when someone joins via the group UI. */
@@ -103,6 +110,20 @@ groupHandlers.on('my_chat_member', async (ctx) => {
   // Added to a group that is not the managed one (typically: the group has not
   // been configured yet). Tell the admins its id, so connecting the group never
   // needs a terminal.
+  if (chat && chat.id === env.TRIAL_SOURCE_CHAT_ID) {
+    const status = ctx.myChatMember.new_chat_member.status;
+    if (status === 'administrator') {
+      await notifyAdmins(
+        `\u2705 Connected to the free-month community (<code>${chat.id}</code>). I will only read who joined when \u2014 I never post or remove anyone there.`,
+      );
+    } else if (['left', 'kicked', 'member'].includes(status)) {
+      await notifyAdmins(
+        '\u26A0\uFE0F I am no longer an admin in the free-month community, so I cannot check who qualifies. Make me an admin there again.',
+      );
+    }
+    return;
+  }
+
   if (chat && chat.id !== env.GROUP_CHAT_ID && chat.type !== 'private') {
     const status = ctx.myChatMember.new_chat_member.status;
     if (status !== 'administrator' && status !== 'member') return;
@@ -127,6 +148,17 @@ groupHandlers.on('my_chat_member', async (ctx) => {
       lines.push(
         '\u26A0\uFE0F I am only a member. Make me an <b>admin</b> who can invite',
         'users via link and remove members.',
+      );
+    } else if (env.groupConfigured) {
+      // The paid channel is already set, so this is almost certainly the
+      // community whose recent members get a free month.
+      lines.push(
+        '\u2705 If this is the community whose recent members get a <b>free month</b>, set this in',
+        'Vercel \u2192 Settings \u2192 Environment Variables, then redeploy:',
+        '',
+        `<code>TRIAL_SOURCE_CHAT_ID=${chat.id}</code>`,
+        '',
+        '<i>Do not change GROUP_CHAT_ID \u2014 that stays your paid channel.</i>',
       );
     } else {
       lines.push(

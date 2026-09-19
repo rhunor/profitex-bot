@@ -15,6 +15,10 @@ export interface IUser extends Document {
   joinedGroupAt?: Date;
   leftGroupAt?: Date;
   lastSeenAt: Date;
+  /** Set once, when the free month is granted. Guarantees one trial per person. */
+  trialClaimedAt?: Date;
+  /** Last eligibility answer, cached so /start does not query Telegram every time. */
+  trialCheck?: { result: string; joinedAt?: Date; checkedAt: Date };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -34,6 +38,12 @@ const userSchema = new Schema<IUser>(
     joinedGroupAt: { type: Date },
     leftGroupAt: { type: Date },
     lastSeenAt: { type: Date, default: () => new Date() },
+    trialClaimedAt: { type: Date, default: null },
+    trialCheck: {
+      result: { type: String },
+      joinedAt: { type: Date },
+      checkedAt: { type: Date },
+    },
   },
   { timestamps: true, collection: 'users' },
 );
