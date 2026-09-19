@@ -3,7 +3,7 @@ import { getEnv } from '../config/env';
 import { createLogger } from '../utils/logger';
 import { initialSession, type BotContext, type SessionData } from './context';
 import { MongoSessionStorage } from './session-storage';
-import { attachUser, autoAnswerCallback, ensureDatabase, ignoreBots } from './middlewares';
+import { attachUser, autoAnswerCallback, dropIgnorableUpdates, ensureDatabase, ignoreBots } from './middlewares';
 import { startHandlers } from './handlers/start';
 import { planHandlers, handleEmailStep } from './handlers/plans';
 import { accountHandlers } from './handlers/account';
@@ -31,6 +31,8 @@ export function createBot(): Bot<BotContext> {
   const env = getEnv();
   const bot = new Bot<BotContext>(env.BOT_TOKEN);
 
+  // First, so ignored group chatter never reaches the database.
+  bot.use(dropIgnorableUpdates);
   bot.use(ensureDatabase);
 
   bot.use(

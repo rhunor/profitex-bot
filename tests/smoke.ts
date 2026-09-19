@@ -237,6 +237,35 @@ async function main(): Promise<void> {
     assert.deepEqual(creator, { status: 'member', joinedAt: null, role: 'creator' });
   });
 
+  console.log('\nIgnoring group chatter');
+  const { isIgnorableUpdate } = await import('../src/bot/middlewares');
+  const PAID = -1001234567890;
+  const SOURCE_GROUP = { id: -1002182527223, type: 'supergroup' };
+  const ignorable = (chat: unknown, update: Record<string, unknown>) =>
+    isIgnorableUpdate({ chat, update } as never, PAID);
+
+  await check('messages posted in a group are dropped before the database', () => {
+    assert.equal(ignorable(SOURCE_GROUP, { message: {} }), true);
+    assert.equal(ignorable(SOURCE_GROUP, { edited_message: {} }), true);
+  });
+
+  await check('joins and leaves in the source group are dropped', () => {
+    assert.equal(ignorable(SOURCE_GROUP, { chat_member: {} }), true);
+  });
+
+  await check('joins in the paid channel are kept (they start the free-month clock)', () => {
+    assert.equal(ignorable({ id: PAID, type: 'channel' }, { chat_member: {} }), false);
+  });
+
+  await check('being added to any chat is kept (that is how the bot reports its id)', () => {
+    assert.equal(ignorable(SOURCE_GROUP, { my_chat_member: {} }), false);
+  });
+
+  await check('everything in a private chat is kept', () => {
+    assert.equal(ignorable({ id: 555, type: 'private' }, { message: {} }), false);
+    assert.equal(ignorable({ id: 555, type: 'private' }, { callback_query: {} }), false);
+  });
+
   console.log('\nMoney (minor units)');
   await check('converts without floating point drift', () => {
     assert.equal(toMinor(25_000), 2_500_000);
