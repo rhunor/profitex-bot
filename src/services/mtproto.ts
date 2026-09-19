@@ -20,7 +20,16 @@ import { createLogger } from '../utils/logger';
  */
 
 const log = createLogger('mtproto');
-const SESSION_KEY = 'mtproto_bot_session';
+/**
+ * Both the signed-in session and every access hash belong to one specific bot
+ * account — Telegram issues different access hashes to different accounts. Key
+ * them by the bot's id (the part of BOT_TOKEN before the colon) so that
+ * switching to a different bot can never reuse the old bot's session or hashes.
+ */
+function botId(): string {
+  return getEnv().BOT_TOKEN.split(':')[0];
+}
+const sessionKey = () => `mtproto_bot_session:${botId()}`;
 const LOOKUP_TIMEOUT_MS = 20_000;
 
 export type Membership =
@@ -91,7 +100,7 @@ async function withClient<T>(work: (client: TelegramClient, api: GramApi) => Pro
   // MTPROTO_EPHEMERAL=1 (local diagnostics): use a throwaway session and never
   // touch the stored one, so a check from a laptop cannot disturb production.
   const ephemeral = process.env.MTPROTO_EPHEMERAL === '1';
-  const saved = ephemeral ? null : await readSetting(SESSION_KEY);
+  const saved = ephemeral ? null : await readSetting(sessionKey());
   const client = new TelegramClient(new StringSession(saved ?? ''), env.TELEGRAM_API_ID, env.TELEGRAM_API_HASH, {
     connectionRetries: 2,
     autoReconnect: false,
@@ -107,7 +116,7 @@ async function withClient<T>(work: (client: TelegramClient, api: GramApi) => Pro
         { apiId: env.TELEGRAM_API_ID, apiHash: env.TELEGRAM_API_HASH },
         { botAuthToken: env.BOT_TOKEN },
       );
-      if (!ephemeral) await writeSetting(SESSION_KEY, (client.session as StringSession).save());
+      if (!ephemeral) await writeSetting(sessionKey(), (client.session as StringSession).save());
     }
 
     return await work(client, Api);
@@ -133,7 +142,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-const channelHashKey = (chatId: number) => `mtproto_channel_hash:${chatId}`;
+const channelHashKey = (chatId: number) => `mtproto_channel_hash:${botId()}:${chatId}`;
 
 type GramApi = typeof Api;
 

@@ -1029,6 +1029,12 @@ async function main(): Promise<void> {
     assert.ok(calls.indexOf('channels.GetChannels') < calls.indexOf('channels.GetParticipant'));
   });
 
+  await check('the remembered access hash belongs to this bot only', async () => {
+    // Access hashes differ per Telegram account; a different bot must never reuse them.
+    const keys = (await AppSetting.find({}).lean()).map((doc) => doc.key);
+    assert.ok(keys.includes('mtproto_channel_hash:1234567890:-1002182527223'), `stored under: ${keys.join(', ')}`);
+  });
+
   await check('the access hash is remembered, so later lookups skip that step', async () => {
     calls.length = 0;
     await mtproto.lookupMembership(GROUP, 950001);
