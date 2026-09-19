@@ -223,10 +223,21 @@ export function createApp(): Express {
       return;
     }
 
-    await connectToDatabase();
-
     const mode = firstQueryValue(req.query.mode) === 'broadcast' ? 'broadcast' : 'full';
     const depth = Number(firstQueryValue(req.query.depth) ?? 0) || 0;
+    const async = ['1', 'true', 'yes'].includes((firstQueryValue(req.query.async) ?? '').toLowerCase());
+
+    // `async=1` hands the work to a fresh invocation and answers straight away.
+    // External pingers (cron-job.org and friends) cut requests off after ~30s
+    // and report a timeout as a failure; a busy pass can take longer than that.
+    if (async) {
+      const chain = await chainFollowUpPass(depth, mode);
+      res.status(202).json({ ok: true, mode, depth, started: chain === 'chained', chain });
+      return;
+    }
+
+    // Only the synchronous path touches the database.
+    await connectToDatabase();
 
     if (mode === 'broadcast') {
       const report = await processBroadcastQueue();

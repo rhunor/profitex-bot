@@ -226,8 +226,12 @@ async function main(): Promise<void> {
     assert.equal(addDays(start, 30).toISOString(), '2026-03-02T12:00:00.000Z');
   });
   await check('humanises remaining time', () => {
-    assert.match(humaniseRemaining(new Date(Date.now() + 2 * DAY + 3 * HOUR)), /^2 days, 3 hours$/);
-    assert.equal(humaniseRemaining(new Date(Date.now() - 1000)), 'expired');
+    // Pin `now` explicitly: with a wall-clock default, the few milliseconds the
+    // assertion itself takes tip 3 hours over into "2 hours".
+    const now = new Date('2026-01-01T00:00:00.000Z');
+    const target = new Date(now.getTime() + 2 * DAY + 3 * HOUR);
+    assert.equal(humaniseRemaining(target, now), '2 days, 3 hours');
+    assert.equal(humaniseRemaining(new Date(now.getTime() - 1000), now), 'expired');
   });
 
   console.log('\nReferences and text');
@@ -364,6 +368,19 @@ async function main(): Promise<void> {
   await check('setup link refuses a wrong secret', async () => {
     const response = await fetch(`${base}/api/setup?secret=wrong`);
     assert.equal(response.status, 401);
+  });
+
+  await check('cron async mode answers immediately for external pingers', async () => {
+    // Must not do the work inline: pingers time out at ~30s and report failure.
+    const started = Date.now();
+    const response = await fetch(`${base}/api/cron/run?async=1`, {
+      method: 'POST',
+      headers: { 'x-cron-secret': 'cron-secret-value' },
+    });
+    assert.equal(response.status, 202);
+    const body = (await response.json()) as { ok: boolean; chain: string };
+    assert.equal(body.ok, true);
+    assert.ok(Date.now() - started < 10_000, 'the reply must come back fast');
   });
 
   await check('payment callback without a reference is a 400', async () => {

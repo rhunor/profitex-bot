@@ -73,8 +73,6 @@ src/
   http/app.ts              Every HTTP route.
   index.ts                 Standalone entry point (polling or webhook + cron).
 api/index.ts               Vercel serverless entry point.
-.github/workflows/         GitHub Actions scheduler — 30-minute passes, which is
-                           how the Vercel Hobby daily cron cap is beaten.
 scripts/                   seed, doctor, set-webhook, find-group-id, cron,
                            simulate-expiry.
 tests/                     Offline smoke test + full lifecycle integration test.
@@ -154,8 +152,8 @@ design make that enough:
    subscriber's own recent payments on the spot.
 
 The only real cost of a daily cadence is that an expired member can linger in the
-group for up to 24 hours. Enabling the bundled GitHub Actions workflow drops that
-to 30 minutes — see [DEPLOYMENT.md](DEPLOYMENT.md#removals-within-30-minutes-still-free).
+group for up to 24 hours. Pointing any free external pinger at `/api/cron/run?async=1` drops that to 15
+minutes — see [DEPLOYMENT.md](DEPLOYMENT.md#removals-within-30-minutes-still-free).
 
 ## Tests
 
