@@ -88,7 +88,10 @@ async function withClient<T>(work: (client: TelegramClient, api: GramApi) => Pro
     throw new Error('TELEGRAM_API_ID and TELEGRAM_API_HASH are not set.');
   }
 
-  const saved = await readSetting(SESSION_KEY);
+  // MTPROTO_EPHEMERAL=1 (local diagnostics): use a throwaway session and never
+  // touch the stored one, so a check from a laptop cannot disturb production.
+  const ephemeral = process.env.MTPROTO_EPHEMERAL === '1';
+  const saved = ephemeral ? null : await readSetting(SESSION_KEY);
   const client = new TelegramClient(new StringSession(saved ?? ''), env.TELEGRAM_API_ID, env.TELEGRAM_API_HASH, {
     connectionRetries: 2,
     autoReconnect: false,
@@ -104,7 +107,7 @@ async function withClient<T>(work: (client: TelegramClient, api: GramApi) => Pro
         { apiId: env.TELEGRAM_API_ID, apiHash: env.TELEGRAM_API_HASH },
         { botAuthToken: env.BOT_TOKEN },
       );
-      await writeSetting(SESSION_KEY, (client.session as StringSession).save());
+      if (!ephemeral) await writeSetting(SESSION_KEY, (client.session as StringSession).save());
     }
 
     return await work(client, Api);

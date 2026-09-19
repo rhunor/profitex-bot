@@ -20,6 +20,7 @@
     "doctor": "tsx scripts/doctor.ts",
     "find-group-id": "tsx scripts/find-group-id.ts",
     "setup-bot": "tsx scripts/setup-bot-profile.ts",
+    "check-trial": "tsx scripts/check-trial.ts",
     "cron": "tsx scripts/run-cron.ts",
     "simulate-expiry": "tsx scripts/simulate-expiry.ts",
     "test": "npm run test:smoke && npm run test:integration",
