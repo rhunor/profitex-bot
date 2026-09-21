@@ -1078,6 +1078,91 @@ async function main(): Promise<void> {
 
   mtproto.setTestClient(null);
 
+  section('Multi-month plans are tracked to the exact day');
+
+  // The worry: someone pays for 3 months and gets reminders after one.
+  for (const [label, days] of [['1 Month', 30], ['3 Months', 90], ['6 Months', 180], ['1 Year', 365]] as const) {
+    await check(`a ${label} plan reminds only near its real end date`, async () => {
+      const id = 960000 + days;
+      const buyer = await upsertUser({ id, first_name: label.replace(' ', '') });
+      const start = new Date();
+      const { subscription } = await activateOrExtend({
+        user: buyer,
+        planSnapshot: { code: 'x', name: label, priceMinor: 1, currency: 'NGN', durationDays: days },
+        source: 'payment',
+      });
+
+      // The end date is exactly the plan length away, to the day.
+      assert.equal(subscription.expiresAt.getTime(), addDays(start, days).getTime());
+
+      const messagesTo = () => callsTo('sendMessage').filter((c) => c.payload.chat_id === id).length;
+      const expiry = subscription.expiresAt.getTime();
+      const at = (ms: number) => new Date(ms);
+
+      // A month in (for anything longer than a month), nothing should be sent.
+      if (days > 30) {
+        const before = messagesTo();
+        await processReminders(addDays(start, 30));
+        assert.equal(messagesTo(), before, `a ${label} subscriber must hear nothing at day 30`);
+      }
+
+      // Halfway through: still nothing.
+      const beforeHalf = messagesTo();
+      await processReminders(at(start.getTime() + (expiry - start.getTime()) / 2));
+      assert.equal(messagesTo(), beforeHalf, 'nothing halfway through');
+
+      // Then the three reminders, each counted from the real end date.
+      await processReminders(at(expiry - 6 * DAY));
+      await processReminders(at(expiry - 2 * DAY));
+      await processReminders(at(expiry - 12 * 60 * 60 * 1000));
+      const sub = await Subscription.findById(subscription._id);
+      assert.ok(sub!.remindersSent?.d7 && sub!.remindersSent?.d3 && sub!.remindersSent?.h24, 'all three reminders');
+
+      // And removal only after the end date has actually passed.
+      // Scoped to this subscriber: a pass dated months ahead legitimately
+      // expires other fixtures, so a global count would prove nothing.
+      await processExpirations(at(expiry - 60_000));
+      assert.equal(
+        (await Subscription.findById(subscription._id))!.status,
+        'active',
+        'must not be removed one minute before their end date',
+      );
+      await processExpirations(at(expiry + 60_000));
+      assert.equal((await Subscription.findById(subscription._id))!.status, 'expired');
+    });
+  }
+
+  await check('paying for 3 months twice gives six months, not three', async () => {
+    const buyer = await upsertUser({ id: 970001, first_name: 'Stacker' });
+    const quarter = { code: 'quarterly', name: '3 Months', priceMinor: 5_500_000, currency: 'NGN', durationDays: 90 };
+    const first = await activateOrExtend({ user: buyer, planSnapshot: quarter, source: 'payment' });
+    const second = await activateOrExtend({ user: buyer, planSnapshot: quarter, source: 'payment' });
+    const total = (second.subscription.expiresAt.getTime() - Date.now()) / DAY;
+    assert.ok(total > 179.9 && total < 180.1, `expected ~180 days, got ${total}`);
+    assert.ok(second.subscription.expiresAt > first.subscription.expiresAt);
+  });
+
+  await check('the catalogue syncs to the configured prices, with one badge', async () => {
+    const { syncPlans, DEFAULT_PLANS } = await import('../src/services/plan-seed');
+    await syncPlans();
+    const plans = await Plan.find({ code: { $in: DEFAULT_PLANS.map((p) => p.code) } }).sort({ sortOrder: 1 }).lean();
+    assert.deepEqual(
+      plans.map((p) => [p.name, p.priceMinor, p.durationDays]),
+      [['1 Month', 2_000_000, 30], ['3 Months', 5_500_000, 90], ['6 Months', 10_000_000, 180], ['1 Year', 19_000_000, 365]],
+    );
+    const badged = plans.filter((p) => p.badge);
+    assert.equal(badged.length, 1, 'exactly one plan carries a badge');
+    assert.equal(badged[0].code, 'quarterly');
+    assert.equal(badged[0].badge, 'Most Popular');
+  });
+
+  await check('syncing again changes nothing, and never moves an existing end date', async () => {
+    const before = (await getActiveSubscription(970001))!.expiresAt.getTime();
+    const changes = await (await import('../src/services/plan-seed')).syncPlans();
+    assert.deepEqual(changes.map((c) => c.action), ['unchanged', 'unchanged', 'unchanged', 'unchanged']);
+    assert.equal((await getActiveSubscription(970001))!.expiresAt.getTime(), before);
+  });
+
   section('Plan seeding from the setup link');
 
   await check('an existing catalogue is left completely alone', async () => {
@@ -1090,9 +1175,9 @@ async function main(): Promise<void> {
   await check('an empty catalogue gets the starter plans, once', async () => {
     const { seedIfCatalogueEmpty } = await import('../src/services/plan-seed');
     await Plan.deleteMany({});
-    assert.deepEqual((await seedIfCatalogueEmpty()).sort(), ['monthly', 'quarterly', 'yearly']);
+    assert.deepEqual((await seedIfCatalogueEmpty()).sort(), ['biannual', 'monthly', 'quarterly', 'yearly']);
     assert.deepEqual(await seedIfCatalogueEmpty(), [], 'opening the setup link twice must not duplicate');
-    assert.equal(await Plan.countDocuments({}), 3);
+    assert.equal(await Plan.countDocuments({}), 4);
   });
 
   /* ── Done ───────────────────────────────────────────────── */

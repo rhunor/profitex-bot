@@ -64,7 +64,7 @@ export function planList(): string {
 
 export function planDetail(plan: IPlan): string {
   const lines = [
-    `\u{1F4E6} <b>${escapeHtml(plan.name)}</b>`,
+    `\u{1F4E6} <b>${escapeHtml(plan.name)}</b>${plan.badge ? ` \u2014 \u2B50 <b>${escapeHtml(plan.badge)}</b>` : ''}`,
     '',
     `Price: <b>${formatMoney(plan.priceMinor, plan.currency)}</b>`,
     `Duration: <b>${planDuration(plan.durationDays)}</b>`,

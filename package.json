@@ -15,6 +15,7 @@
     "start": "node dist/index.js",
     "dev": "cross-env NODE_ENV=development tsx watch src/index.ts",
     "seed": "tsx scripts/seed.ts",
+    "sync-plans": "tsx scripts/sync-plans.ts",
     "set-webhook": "tsx scripts/set-webhook.ts",
     "delete-webhook": "tsx scripts/set-webhook.ts --delete",
     "doctor": "tsx scripts/doctor.ts",

@@ -9,7 +9,15 @@ import { adminBackKeyboard, adminMenuKeyboard } from '../keyboards';
 import { community } from '../texts';
 import { clearStep, render, reply, toast } from '../helpers';
 import { showMemberCard, showMembers, showPayments, showStats } from './reports';
-import { handlePlanStep, promptPlanAdd, promptPlanField, showPlanAdmin, showPlanEditor, togglePlan } from './plans';
+import {
+  handlePlanStep,
+  promptPlanAdd,
+  promptPlanField,
+  showPlanAdmin,
+  showPlanEditor,
+  toggleBadge,
+  togglePlan,
+} from './plans';
 import {
   captureBroadcastMessage,
   handleDirectMessageStep,
@@ -247,6 +255,10 @@ admin.callbackQuery('adm:planadd', async (ctx) => {
 
 admin.callbackQuery(/^adm:plan:([a-f0-9]{24})$/i, async (ctx) => {
   await showPlanEditor(ctx, ctx.match[1]);
+});
+
+admin.callbackQuery(/^adm:planbadge:([a-f0-9]{24})$/i, async (ctx) => {
+  await toggleBadge(ctx, ctx.match[1]);
 });
 
 admin.callbackQuery(/^adm:plantoggle:([a-f0-9]{24})$/i, async (ctx) => {

@@ -48,7 +48,9 @@ export function plansKeyboard(plans: IPlan[]): InlineKeyboard {
   for (const plan of plans) {
     keyboard
       .text(
-        `${plan.name} • ${formatMoney(plan.priceMinor, plan.currency)} • ${planDuration(plan.durationDays)}`,
+        plan.badge
+          ? `\u2B50 ${plan.name} \u2014 ${formatMoney(plan.priceMinor, plan.currency)} \u00B7 ${plan.badge}`
+          : `${plan.name} \u2014 ${formatMoney(plan.priceMinor, plan.currency)}`,
         `plan:${String(plan._id)}`,
       )
       .row();
@@ -151,7 +153,7 @@ export function planAdminKeyboard(plans: IPlan[]): InlineKeyboard {
   for (const plan of plans) {
     keyboard
       .text(
-        `${plan.isActive ? '✅' : '\u{1F6AB}'} ${plan.name} • ${formatMoney(plan.priceMinor, plan.currency)}`,
+        `${plan.isActive ? '✅' : '\u{1F6AB}'} ${plan.name} • ${formatMoney(plan.priceMinor, plan.currency)}${plan.badge ? ' ⭐' : ''}`,
         `adm:plan:${String(plan._id)}`,
       )
       .row();
@@ -160,13 +162,15 @@ export function planAdminKeyboard(plans: IPlan[]): InlineKeyboard {
   return keyboard;
 }
 
-export function planEditKeyboard(planId: string, isActive: boolean): InlineKeyboard {
+export function planEditKeyboard(planId: string, isActive: boolean, hasBadge = false): InlineKeyboard {
   return new InlineKeyboard()
     .text('\u{1F4B0} Change price', `adm:planprice:${planId}`)
     .row()
     .text('✏️ Rename', `adm:planname:${planId}`)
     .row()
     .text('\u{1F4C5} Change duration', `adm:plandays:${planId}`)
+    .row()
+    .text(hasBadge ? '⭐ Remove "Most Popular"' : '⭐ Mark as "Most Popular"', `adm:planbadge:${planId}`)
     .row()
     .text(isActive ? '\u{1F6AB} Retire plan' : '✅ Re-activate plan', `adm:plantoggle:${planId}`)
     .row()

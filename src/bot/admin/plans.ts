@@ -40,10 +40,31 @@ export async function showPlanEditor(ctx: BotContext, planId: string): Promise<v
     `Price: <b>${formatMoney(plan.priceMinor, plan.currency)}</b>`,
     `Duration: <b>${planDuration(plan.durationDays)}</b> (${plan.durationDays} days)`,
     `Status: <b>${plan.isActive ? 'on sale' : 'retired'}</b>`,
+    plan.badge ? `Badge: ⭐ <b>${escapeHtml(plan.badge)}</b>` : 'Badge: none',
   ];
   if (plan.description) lines.push('', escapeHtml(plan.description));
 
-  await render(ctx, lines.join('\n'), planEditKeyboard(planId, plan.isActive));
+  await render(ctx, lines.join('\n'), planEditKeyboard(planId, plan.isActive, Boolean(plan.badge)));
+}
+
+/** Only one plan carries the badge, so setting it clears it everywhere else. */
+export async function toggleBadge(ctx: BotContext, planId: string): Promise<void> {
+  const plan = await Plan.findById(planId);
+  if (!plan) {
+    await render(ctx, '\u26A0\uFE0F That plan no longer exists.', adminBackKeyboard());
+    return;
+  }
+
+  if (plan.badge) {
+    plan.badge = undefined;
+    await plan.save();
+  } else {
+    await Plan.updateMany({ _id: { $ne: plan._id } }, { $unset: { badge: '' } });
+    plan.badge = 'Most Popular';
+    await plan.save();
+  }
+
+  await showPlanEditor(ctx, planId);
 }
 
 export async function togglePlan(ctx: BotContext, planId: string): Promise<void> {
