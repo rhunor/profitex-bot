@@ -12,6 +12,7 @@ import { processBroadcastQueue } from '../services/broadcast.service';
 import { chainFollowUpPass } from '../services/dispatch';
 import { Plan, type Gateway } from '../models';
 import { seedIfCatalogueEmpty } from '../services/plan-seed';
+import { listPostableChats } from '../services/chats.service';
 import { checkCommunityRights } from '../services/telegram';
 import { diagnoseLookup, lookupMembership, verifyTrialSourceAccess } from '../services/mtproto';
 import { publicUrl } from '../config/env';
@@ -311,6 +312,7 @@ export function createApp(): Express {
         freeMonth = {
           enabled: true,
           source: access.ok ? access.title : null,
+          chatId: env.TRIAL_SOURCE_CHAT_ID,
           sourceReachable: access.ok,
           eligibleIfJoinedOnOrAfter: env.trialEligibleFrom?.toISOString(),
           days: env.TRIAL_DAYS,
@@ -368,8 +370,14 @@ export function createApp(): Express {
               },
               commandsPublishedForAdmins: env.adminIds.size,
               community: rights
-                ? { type: rights.chatType, title: rights.title, rightsOk: rights.ok }
+                ? { chatId: env.GROUP_CHAT_ID, type: rights.chatType, title: rights.title, rightsOk: rights.ok }
                 : { configured: false, expectedType: env.COMMUNITY_TYPE },
+              postableChats: (await listPostableChats()).map((c) => ({
+                chatId: c.chatId,
+                title: c.title,
+                type: c.type,
+                role: c.role ?? null,
+              })),
               paystackConfigured: env.paystackEnabled,
               activePlans,
               seededPlans,

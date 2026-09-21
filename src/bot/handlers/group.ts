@@ -8,6 +8,7 @@ import { setGroupMembership } from '../../services/user.service';
 import { removeMemberFromGroup, sendMessageSafe } from '../../services/telegram';
 import { notifyAdmins, notifyUnauthorisedRemoval } from '../../services/notify.service';
 import { startTrialClockOnJoin } from '../../services/trial.service';
+import { rememberChat } from '../../services/chats.service';
 import { escapeHtml } from '../../utils/text';
 import type { BotContext } from '../context';
 import * as texts from '../texts';
@@ -106,6 +107,17 @@ groupHandlers.on('chat_member', async (ctx) => {
 groupHandlers.on('my_chat_member', async (ctx) => {
   const env = getEnv();
   const chat = ctx.chat;
+
+  // Keep the list of chats the bot belongs to up to date; it is the only way
+  // to offer a choice of where to post, since the Bot API cannot list them.
+  if (chat && chat.type !== 'private') {
+    const member = ctx.myChatMember.new_chat_member;
+    await rememberChat(
+      { id: chat.id, type: chat.type, title: 'title' in chat ? chat.title : undefined },
+      member.status,
+      member.status === 'administrator' ? member : {},
+    );
+  }
 
   // Added to a group that is not the managed one (typically: the group has not
   // been configured yet). Tell the admins its id, so connecting the group never

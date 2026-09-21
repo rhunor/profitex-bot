@@ -25,6 +25,7 @@ import {
   promptBroadcastAudience,
   promptBroadcastMessage,
   promptDirectMessage,
+  promptPostBody,
   promptPostToGroup,
   sendBroadcast,
 } from './messaging';
@@ -164,15 +165,21 @@ admin.command('post', async (ctx) => {
     return;
   }
 
-  const { copyToGroup } = await import('../../services/telegram');
-  const { sendMessageSafe } = await import('../../services/telegram');
+  const { copyToChat, sendMessageSafe } = await import('../../services/telegram');
   const { getEnv } = await import('../../config/env');
 
+  // A direct /post goes to the paid community; use the menu to choose another.
+  const target = getEnv().GROUP_CHAT_ID;
   const posted = replied
-    ? await copyToGroup(ctx.chat!.id, replied.message_id)
-    : (await sendMessageSafe(getEnv().GROUP_CHAT_ID, escapeHtml(text))).ok;
+    ? (await copyToChat(target, ctx.chat!.id, replied.message_id)).ok
+    : (await sendMessageSafe(target, escapeHtml(text))).ok;
 
-  await reply(ctx, posted ? `✅ Posted to the ${community()}.` : `⚠️ Could not post to the ${community()}.`);
+  await reply(
+    ctx,
+    posted
+      ? `✅ Posted to the ${community()} (<code>${target}</code>).`
+      : `⚠️ Could not post to the ${community()} (<code>${target}</code>). Use /admin → Post to see every chat I can post in.`,
+  );
 });
 
 admin.command('broadcast', async (ctx) => {
@@ -279,6 +286,10 @@ admin.callbackQuery(/^adm:plandays:([a-f0-9]{24})$/i, async (ctx) => {
 
 admin.callbackQuery('adm:post', async (ctx) => {
   await promptPostToGroup(ctx);
+});
+
+admin.callbackQuery(/^adm:postto:(-?\d+)$/, async (ctx) => {
+  await promptPostBody(ctx, Number(ctx.match[1]));
 });
 
 admin.callbackQuery('adm:bc', async (ctx) => {

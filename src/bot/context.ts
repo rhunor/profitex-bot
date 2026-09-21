@@ -7,6 +7,8 @@ export interface AdminSessionState {
   dmTargetTelegramId?: number;
   grantTargetTelegramId?: number;
   planId?: string;
+  /** Where an in-progress /post will be sent. */
+  postTargetChatId?: number;
 }
 
 export interface SessionData {

@@ -8,3 +8,4 @@ export * from './Broadcast';
 export * from './SessionStore';
 export * from './ActivityLog';
 export * from './AppSetting';
+export * from './ManagedChat';

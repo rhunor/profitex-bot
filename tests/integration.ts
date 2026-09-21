@@ -167,6 +167,28 @@ async function main(): Promise<void> {
       case 'banChatMember':
       case 'unbanChatMember':
         return { ok: true, result: true } as never;
+      case 'getChat': {
+        const id = Number((payload as { chat_id: number }).chat_id);
+        return {
+          ok: true,
+          result: {
+            id,
+            type: id === -1001234567890 ? 'channel' : 'supergroup',
+            title: id === -1001234567890 ? 'PFT VIP Signals.' : 'Profitable FX Trading Academy',
+          },
+        } as never;
+      }
+      case 'getChatMember':
+        return {
+          ok: true,
+          result: {
+            status: 'administrator',
+            user: { id: 1, is_bot: true, first_name: 'Profitex' },
+            can_post_messages: true,
+            can_invite_users: true,
+            can_restrict_members: true,
+          },
+        } as never;
       default:
         return { ok: true, result: true } as never;
     }
@@ -1161,6 +1183,50 @@ async function main(): Promise<void> {
     const changes = await (await import('../src/services/plan-seed')).syncPlans();
     assert.deepEqual(changes.map((c) => c.action), ['unchanged', 'unchanged', 'unchanged', 'unchanged']);
     assert.equal((await getActiveSubscription(970001))!.expiresAt.getTime(), before);
+  });
+
+  section('Choosing where to post');
+
+  const chats = await import('../src/services/chats.service');
+  const { ManagedChat } = await import('../src/models');
+
+  await check('a channel counts as postable only with Post Messages', async () => {
+    await ManagedChat.deleteMany({});
+    await chats.rememberChat({ id: -1005550001, type: 'channel', title: 'Announcements' }, 'administrator', {
+      can_post_messages: true,
+    });
+    await chats.rememberChat({ id: -1005550002, type: 'channel', title: 'Read Only' }, 'administrator', {});
+    assert.equal((await ManagedChat.findOne({ chatId: -1005550001 }))!.canPost, true);
+    assert.equal((await ManagedChat.findOne({ chatId: -1005550002 }))!.canPost, false);
+  });
+
+  await check('an admin in a group can post; a plain member cannot', async () => {
+    await chats.rememberChat({ id: -1005550003, type: 'supergroup', title: 'Team' }, 'administrator');
+    await chats.rememberChat({ id: -1005550004, type: 'supergroup', title: 'Lurking' }, 'member');
+    assert.equal((await ManagedChat.findOne({ chatId: -1005550003 }))!.canPost, true);
+    assert.equal((await ManagedChat.findOne({ chatId: -1005550004 }))!.canPost, false);
+  });
+
+  await check('losing admin rights removes a chat from the list', async () => {
+    await chats.rememberChat({ id: -1005550003, type: 'supergroup', title: 'Team' }, 'left');
+    assert.equal((await ManagedChat.findOne({ chatId: -1005550003 }))!.canPost, false);
+    const postable = await chats.listPostableChats();
+    assert.equal(postable.some((c) => c.chatId === -1005550003), false);
+  });
+
+  await check('the paid channel and the free-month source are found and labelled', async () => {
+    await ManagedChat.deleteMany({});
+    const postable = await chats.listPostableChats();
+    const paid = postable.find((c) => c.chatId === -1001234567890);
+    const source = postable.find((c) => c.chatId === -1009999999999);
+
+    assert.ok(paid, 'the paid channel must be offered');
+    assert.equal(paid!.title, 'PFT VIP Signals.');
+    assert.equal(paid!.role, 'paid');
+
+    assert.ok(source, 'the other chat must be offered too');
+    assert.equal(source!.title, 'Profitable FX Trading Academy');
+    assert.equal(source!.role, 'trial-source');
   });
 
   section('Plan seeding from the setup link');

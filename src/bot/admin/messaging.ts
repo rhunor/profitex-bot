@@ -4,10 +4,18 @@ import { escapeHtml, truncate } from '../../utils/text';
 import { recordActivity, type BroadcastAudience } from '../../models';
 import { createBroadcast, resolveAudience } from '../../services/broadcast.service';
 import { kickBroadcastWorker } from '../../services/dispatch';
-import { copyMessageSafe, copyToGroup } from '../../services/telegram';
+import { copyMessageSafe, copyToChat } from '../../services/telegram';
+import { listPostableChats } from '../../services/chats.service';
+import { ManagedChat } from '../../models';
 import { markUnreachable } from '../../services/user.service';
 import type { BotContext } from '../context';
-import { adminBackKeyboard, broadcastAudienceKeyboard, broadcastConfirmKeyboard, cancelKeyboard } from '../keyboards';
+import {
+  adminBackKeyboard,
+  broadcastAudienceKeyboard,
+  broadcastConfirmKeyboard,
+  cancelKeyboard,
+  postTargetsKeyboard,
+} from '../keyboards';
 import { render, reply } from '../helpers';
 import { community } from '../texts';
 
@@ -124,14 +132,53 @@ export async function sendBroadcast(ctx: BotContext): Promise<void> {
   await kickBroadcastWorker();
 }
 
+/** Step 1: which chat? Skipped when the bot can only post in one. */
 export async function promptPostToGroup(ctx: BotContext): Promise<void> {
-  ctx.session.step = 'adm_post';
+  ctx.session.step = undefined;
+  const chats = await listPostableChats();
+
+  if (chats.length === 0) {
+    await render(
+      ctx,
+      [
+        '\u26A0\uFE0F <b>Nowhere to post</b>',
+        '',
+        'I am not an administrator with permission to post in any chat.',
+        'In a channel I need <b>Post Messages</b>; in a group, admin is enough.',
+      ].join('\n'),
+      adminBackKeyboard(),
+    );
+    return;
+  }
+
+  if (chats.length === 1) {
+    await promptPostBody(ctx, chats[0].chatId);
+    return;
+  }
+
   await render(
     ctx,
     [
-      `\u{1F4E2} <b>Post to the ${community()}</b>`,
+      '\u{1F4E2} <b>Where should it go?</b>',
       '',
-      `Send the message you want posted in <b>${escapeHtml(getEnv().GROUP_NAME)}</b>.`,
+      'I can post in these:',
+    ].join('\n'),
+    postTargetsKeyboard(chats),
+  );
+}
+
+/** Step 2: compose. */
+export async function promptPostBody(ctx: BotContext, chatId: number): Promise<void> {
+  const chat = await ManagedChat.findOne({ chatId }).lean();
+  ctx.session.step = 'adm_post';
+  ctx.session.admin = { ...ctx.session.admin, postTargetChatId: chatId };
+
+  await render(
+    ctx,
+    [
+      `\u{1F4E2} <b>Post to ${escapeHtml(chat?.title ?? String(chatId))}</b>`,
+      '',
+      'Send the message you want posted there.',
       '',
       'Text, photos, charts and documents all work.',
     ].join('\n'),
@@ -143,16 +190,31 @@ export async function handlePostStep(ctx: BotContext): Promise<boolean> {
   if (ctx.session.step !== 'adm_post') return false;
   if (!ctx.message || !ctx.chat) return false;
 
+  const targetChatId = ctx.session.admin?.postTargetChatId ?? getEnv().GROUP_CHAT_ID;
   ctx.session.step = undefined;
 
-  const posted = await copyToGroup(ctx.chat.id, ctx.message.message_id);
-  if (posted) {
-    recordActivity({ action: 'admin.post', actorTelegramId: ctx.from?.id, message: `Posted to the ${community()}` });
-    await reply(ctx, `✅ Posted to the ${community()}.`, adminBackKeyboard());
+  const chat = await ManagedChat.findOne({ chatId: targetChatId }).lean();
+  const where = escapeHtml(chat?.title ?? String(targetChatId));
+
+  const posted = await copyToChat(targetChatId, ctx.chat.id, ctx.message.message_id);
+  if (posted.ok) {
+    recordActivity({
+      action: 'admin.post',
+      actorTelegramId: ctx.from?.id,
+      message: `Posted to ${chat?.title ?? targetChatId}`,
+      meta: { chatId: targetChatId },
+    });
+    await reply(ctx, `✅ Posted to <b>${where}</b> (<code>${targetChatId}</code>).`, adminBackKeyboard());
   } else {
     await reply(
       ctx,
-      `⚠️ Could not post. Check that the bot is still an administrator in the ${community()} with permission to post messages.`,
+      [
+        `⚠️ Could not post to <b>${where}</b>.`,
+        '',
+        `Telegram said: <code>${escapeHtml(posted.error ?? 'unknown error')}</code>`,
+        '',
+        'In a channel the bot needs <b>Post Messages</b>; in a group, admin rights.',
+      ].join('\n'),
       adminBackKeyboard(),
     );
   }

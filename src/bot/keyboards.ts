@@ -111,6 +111,19 @@ export function adminMenuKeyboard(): InlineKeyboard {
     .row();
 }
 
+export function postTargetsKeyboard(
+  chats: Array<{ chatId: number; title: string; type: string; role?: string | null }>,
+): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  for (const chat of chats) {
+    const icon = chat.type === 'channel' ? '\u{1F4E2}' : '\u{1F465}';
+    const label = chat.role === 'paid' ? ' (paid)' : chat.role === 'trial-source' ? ' (free-month source)' : '';
+    keyboard.text(`${icon} ${chat.title}${label}`, `adm:postto:${chat.chatId}`).row();
+  }
+  keyboard.text('\u2B05\uFE0F Admin menu', 'adm:menu');
+  return keyboard;
+}
+
 export function adminBackKeyboard(): InlineKeyboard {
   return new InlineKeyboard().text('⬅️ Admin menu', 'adm:menu');
 }

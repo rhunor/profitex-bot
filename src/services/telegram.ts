@@ -123,18 +123,26 @@ export async function copyMessageSafe(
 }
 
 /** Posts an admin message into the managed group, preserving media and formatting. */
-export async function copyToGroup(fromChatId: number, messageId: number): Promise<Message.CommonMessage | null> {
-  const env = getEnv();
+/** Copies an admin's message into any chat the bot can post in. */
+export async function copyToChat(
+  targetChatId: number,
+  fromChatId: number,
+  messageId: number,
+): Promise<{ ok: boolean; error?: string }> {
   try {
-    const result = await callWithRetry(
-      () => getApi().copyMessage(env.GROUP_CHAT_ID, fromChatId, messageId),
-      'copyMessage:group',
-    );
-    return result as unknown as Message.CommonMessage;
+    await callWithRetry(() => getApi().copyMessage(targetChatId, fromChatId, messageId), 'copyMessage:chat');
+    return { ok: true };
   } catch (error) {
-    log.error('Failed to post to group', error);
-    return null;
+    const description = error instanceof GrammyError ? error.description : String(error);
+    log.error('Failed to post to a chat', { targetChatId, description });
+    return { ok: false, error: description };
   }
+}
+
+/** Convenience wrapper for the paid community. */
+export async function copyToGroup(fromChatId: number, messageId: number): Promise<Message.CommonMessage | null> {
+  const result = await copyToChat(getEnv().GROUP_CHAT_ID, fromChatId, messageId);
+  return result.ok ? ({} as Message.CommonMessage) : null;
 }
 
 /**
