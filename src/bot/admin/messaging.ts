@@ -5,7 +5,7 @@ import { recordActivity, type BroadcastAudience } from '../../models';
 import { createBroadcast, resolveAudience } from '../../services/broadcast.service';
 import { kickBroadcastWorker } from '../../services/dispatch';
 import { copyMessageSafe, copyToChat } from '../../services/telegram';
-import { listPostableChats } from '../../services/chats.service';
+import { listPostableChats, refreshChat } from '../../services/chats.service';
 import { ManagedChat } from '../../models';
 import { markUnreachable } from '../../services/user.service';
 import type { BotContext } from '../context';
@@ -169,7 +169,10 @@ export async function promptPostToGroup(ctx: BotContext): Promise<void> {
 
 /** Step 2: compose. */
 export async function promptPostBody(ctx: BotContext, chatId: number): Promise<void> {
-  const chat = await ManagedChat.findOne({ chatId }).lean();
+  // Always name the real chat, as Telegram reports it. Naming the configured
+  // brand instead once made this prompt look like it meant a different chat.
+  let chat = await ManagedChat.findOne({ chatId }).lean();
+  if (!chat) chat = (await refreshChat(chatId))?.toObject() ?? null;
   ctx.session.step = 'adm_post';
   ctx.session.admin = { ...ctx.session.admin, postTargetChatId: chatId };
 
@@ -177,6 +180,7 @@ export async function promptPostBody(ctx: BotContext, chatId: number): Promise<v
     ctx,
     [
       `\u{1F4E2} <b>Post to ${escapeHtml(chat?.title ?? String(chatId))}</b>`,
+      `<i>${chat?.type === 'channel' ? 'Channel' : 'Group'} \u00B7 <code>${chatId}</code></i>`,
       '',
       'Send the message you want posted there.',
       '',
