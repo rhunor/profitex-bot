@@ -98,8 +98,15 @@ export const paystackGateway: PaymentGateway = {
     }
 
     const raw = String(data.status || '').toLowerCase();
+    // `abandoned` means the customer has not finished paying — the checkout
+    // link still works, so this is "not done yet", not a failure. Reporting it
+    // as failed told people who had not paid that their payment had failed.
     const status =
-      raw === 'success' ? 'success' : ['ongoing', 'pending', 'processing'].includes(raw) ? 'pending' : 'failed';
+      raw === 'success'
+        ? 'success'
+        : ['ongoing', 'pending', 'processing', 'queued', 'abandoned'].includes(raw)
+          ? 'pending'
+          : 'failed';
 
     return {
       status,

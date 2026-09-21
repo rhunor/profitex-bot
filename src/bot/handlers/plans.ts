@@ -1,6 +1,6 @@
 import { Composer } from 'grammy';
 import { createLogger } from '../../utils/logger';
-import { isValidEmail } from '../../utils/text';
+import { escapeHtml, isValidEmail } from '../../utils/text';
 import { Plan, type Gateway, type IPlan } from '../../models';
 import { enabledGateways, getGateway, isGatewayEnabled } from '../../services/payments';
 import { finalizePayment, initiatePayment } from '../../services/payment.service';
@@ -189,8 +189,9 @@ planHandlers.callbackQuery(/^check:(.+)$/, async (ctx) => {
 
     switch (result.outcome) {
       case 'fulfilled':
-        // The confirmation message with the join button has already been sent.
-        await toast(ctx, 'Payment confirmed!');
+        // finalizePayment has already sent the confirmation with the join
+        // button, so this message is replaced rather than answered again.
+        await render(ctx, '\u2705 <b>Payment confirmed.</b> Your invite link is in the message below.');
         return;
 
       case 'already_fulfilled': {
@@ -206,9 +207,19 @@ planHandlers.callbackQuery(/^check:(.+)$/, async (ctx) => {
       }
 
       case 'pending':
-      case 'in_progress':
-        await toast(ctx, 'Not confirmed yet — try again in a few seconds.', true);
+      case 'in_progress': {
+        // Must edit the message, not answer the tap again: a callback query can
+        // only be answered once, and it was already answered above. A second
+        // answer is rejected by Telegram, leaving the subscriber staring at
+        // "Checking with the payment gateway…" with no idea what happened.
+        const checkoutUrl = result.payment?.checkoutUrl;
+        await render(
+          ctx,
+          `${texts.paymentPending()}\n\nReference: <code>${escapeHtml(reference)}</code>`,
+          checkoutUrl ? checkoutKeyboard(checkoutUrl, reference) : subscribeKeyboard(),
+        );
         return;
+      }
 
       case 'amount_mismatch':
       case 'failed':

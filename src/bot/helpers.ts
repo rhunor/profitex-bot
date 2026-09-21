@@ -41,10 +41,24 @@ export async function reply(ctx: BotContext, text: string, keyboard?: InlineKeyb
   }
 }
 
+/**
+ * Telegram allows exactly one answer per button tap. A second attempt is
+ * rejected and the subscriber sees nothing — so anything they must actually
+ * read belongs in `render`, not here. Repeat calls are logged, not silent.
+ */
+const answered = new WeakSet<object>();
+
 export async function toast(ctx: BotContext, text: string, alert = false): Promise<void> {
   if (!ctx.callbackQuery) return;
+
+  if (answered.has(ctx.callbackQuery)) {
+    log.warn('Tried to answer the same tap twice; the user will not see this', { text });
+    return;
+  }
+
   try {
     await ctx.answerCallbackQuery({ text, show_alert: alert });
+    answered.add(ctx.callbackQuery);
   } catch {
     /* the query already expired */
   }

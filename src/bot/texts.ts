@@ -105,12 +105,19 @@ export function checkoutReady(planName: string, amountMinor: number, currency: s
 }
 
 export function paymentPending(): string {
+  const env = getEnv();
   return [
-    '⏳ <b>Payment not confirmed yet</b>',
+    '\u23F3 <b>Payment not completed yet</b>',
     '',
-    'We could not see a completed payment for this order yet.',
+    'We have not received confirmation for this order.',
+    'If you have just paid by transfer or USSD, it can take a few minutes.',
     '',
-    'If you have just paid, wait a few seconds and tap <b>I have paid</b> again. If money left your account but this keeps failing, contact support and quote your reference.',
+    '<b>You do not need to keep checking.</b> The moment it clears, this bot sends you your invite link automatically.',
+    '',
+    'If you have not actually paid yet, tap <b>Pay Now</b> to finish.',
+    env.SUPPORT_USERNAME
+      ? `If money left your account more than 10 minutes ago, send your reference below to @${escapeHtml(env.SUPPORT_USERNAME)}.`
+      : 'If money left your account more than 10 minutes ago, contact support with your reference below.',
   ].join('\n');
 }
 

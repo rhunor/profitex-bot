@@ -1185,6 +1185,52 @@ async function main(): Promise<void> {
     assert.equal((await getActiveSubscription(970001))!.expiresAt.getTime(), before);
   });
 
+  section('An unfinished payment');
+
+  await check('an abandoned checkout reads as "not completed", never as failed', async () => {
+    const shopper = await upsertUser({ id: 980001, first_name: 'Browser' });
+    // Read the plan back: an earlier test re-priced it, and the payment must be
+    // verified against the price actually charged.
+    const current = (await Plan.findById(monthly._id))!;
+    const { payment } = await initiatePayment({ user: shopper, plan: current, gateway: 'paystack', email: 'b@example.com' });
+
+    // Exactly what Paystack returns for a checkout nobody completed.
+    script.paystackVerify = (reference) => ({
+      status: true,
+      data: { id: 2001, status: 'abandoned', reference, amount: current.priceMinor, currency: 'NGN' },
+    });
+
+    const result = await finalizePayment(payment.reference, { trigger: 'button' });
+    assert.equal(result.outcome, 'pending', 'an unfinished payment is not a failure');
+    assert.equal(await Subscription.countDocuments({ telegramId: 980001 }), 0, 'and grants nothing');
+
+    // The checkout link must survive, so they can be offered "Pay Now" again.
+    const stored = await Payment.findById(payment._id);
+    assert.equal(stored!.status, 'pending');
+    assert.ok(stored!.checkoutUrl, 'the checkout link is kept so the payment can be finished');
+
+    // Finishing it later still works.
+    script.paystackVerify = (reference) => ({
+      status: true,
+      data: { id: 2001, status: 'success', reference, amount: current.priceMinor, currency: 'NGN' },
+    });
+    assert.equal((await finalizePayment(payment.reference, { trigger: 'button' })).outcome, 'fulfilled');
+    assert.equal(await Subscription.countDocuments({ telegramId: 980001, status: 'active' }), 1);
+  });
+
+  await check('a genuinely declined card is still reported as failed', async () => {
+    const payer = await upsertUser({ id: 980002, first_name: 'Declined' });
+    const declinedPlan = (await Plan.findById(monthly._id))!;
+    const { payment } = await initiatePayment({ user: payer, plan: declinedPlan, gateway: 'paystack', email: 'd@example.com' });
+    script.paystackVerify = (reference) => ({
+      status: true,
+      data: { id: 2002, status: 'failed', reference, amount: declinedPlan.priceMinor, currency: 'NGN', gateway_response: 'Declined' },
+    });
+    const result = await finalizePayment(payment.reference, { trigger: 'button' });
+    assert.equal(result.outcome, 'failed');
+    assert.equal(result.reason, 'Declined');
+  });
+
   section('Choosing where to post');
 
   const chats = await import('../src/services/chats.service');

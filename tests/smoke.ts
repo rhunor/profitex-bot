@@ -341,6 +341,24 @@ async function main(): Promise<void> {
     for (const chunk of chunks) assert.ok(chunk.length <= 4096);
   });
 
+  console.log('\nUnfinished payments');
+  const texts = await import('../src/bot/texts');
+
+  await check('the "not completed" message tells people they need not keep checking', () => {
+    const body = texts.paymentPending();
+    assert.match(body, /not completed yet/i);
+    assert.match(body, /do not need to keep checking/i);
+    assert.match(body, /Pay Now/);
+  });
+
+  await check('Paystack statuses map to the right outcome', () => {
+    const verdict = (status: string) =>
+      paystackGateway.parseWebhook({ event: 'charge.success', data: { reference: 'r', status } }).actionable;
+    // Only a successful charge event ever grants access.
+    assert.equal(verdict('success'), true);
+    assert.equal(paystackGateway.parseWebhook({ event: 'charge.failed', data: { reference: 'r' } }).actionable, false);
+  });
+
   console.log('\nPaystack');
   await check('accepts a correctly signed webhook', () => {
     const body = Buffer.from(JSON.stringify({ event: 'charge.success', data: { reference: 'PTX-1' } }));
