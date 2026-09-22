@@ -989,6 +989,29 @@ async function main(): Promise<void> {
     assert.equal(subscription.source, 'payment', 'once paid, it is no longer a trial');
   });
 
+  await check('paying a longer plan during the free month stacks onto it', async () => {
+    // The exact scenario: someone on a free month pays for 3 months in advance.
+    membershipBook.set(940012, member(new Date('2026-09-02T00:00:00Z')));
+    const user = await upsertUser({ id: 940012, first_name: 'Advance' });
+    await trial.grantTrial(user, null);
+    const trialEnds = (await getActiveSubscription(940012))!.expiresAt;
+
+    const quarterly = { code: 'quarterly', name: '3 Months', priceMinor: 5_500_000, currency: 'NGN', durationDays: 90 };
+    const { subscription } = await activateOrExtend({ user, planSnapshot: quarterly, source: 'payment' });
+
+    const added = (subscription.expiresAt.getTime() - trialEnds.getTime()) / DAY;
+    assert.ok(added > 89.9 && added < 90.1, `expected the 90 days on top of the free month, got ${added}`);
+    assert.equal(subscription.source, 'payment', 'they are now a paying member');
+
+    // And no reminders until the new, later date.
+    assert.equal(subscription.remindersSent?.d7, undefined);
+    await processReminders(new Date(trialEnds.getTime() - DAY));
+    const after = await Subscription.findById(subscription._id);
+    assert.equal(after!.remindersSent?.h24, undefined, 'no reminder at the old free-month end date');
+    assert.equal(after!.remindersSent?.d3, undefined);
+    assert.equal(after!.remindersSent?.d7, undefined);
+  });
+
   await check('free-month reminders and removal speak about the free month', async () => {
     const trialSub = (await getActiveSubscription(940002))!;
     assert.match(texts.reminder7Day(trialSub), /free month/i);
