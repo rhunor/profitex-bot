@@ -336,6 +336,14 @@ export function createApp(): Express {
         freeMonth = { enabled: false, missing: missingTrialVars };
       }
 
+      // A pile of payments stuck pending is the signature of a webhook that is
+      // not configured — the one failure that silently costs real money.
+      const { Payment } = await import('../models');
+      const stuckPayments = await Payment.countDocuments({
+        status: 'pending',
+        createdAt: { $lte: new Date(Date.now() - 2 * 60 * 60 * 1000), $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+      });
+
       const info = await bot.api.getWebhookInfo();
       const activePlans = await Plan.countDocuments({ isActive: true });
 
@@ -350,6 +358,11 @@ export function createApp(): Express {
       }
       if (freeMonth.enabled && !freeMonth.sourceReachable) {
         todo.push(`Free month: cannot read the source community (${String(freeMonth.error)}). Is the bot an admin there?`);
+      }
+      if (stuckPayments > 0) {
+        todo.push(
+          `${stuckPayments} payment(s) have been pending for over 2 hours. If any were really paid, the Paystack webhook URL is probably not set for these keys.`,
+        );
       }
       if (activePlans === 0) todo.push('No active plans on sale. Re-activate or add one in the bot: /admin -> Plans.');
       if (seededPlans.length) todo.push('Starter plans were created at placeholder prices. Set real prices: /admin -> Plans.');
@@ -380,6 +393,7 @@ export function createApp(): Express {
               })),
               paystackConfigured: env.paystackEnabled,
               activePlans,
+              stuckPayments,
               seededPlans,
               freeMonth,
               stillToDo: todo.length ? todo : ['Nothing. Send /start to the bot.'],

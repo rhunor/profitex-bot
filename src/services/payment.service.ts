@@ -18,12 +18,20 @@ import { getGateway } from './payments';
 import { GatewayError } from './payments/types';
 import { activateOrExtend, snapshotFromPlan } from './subscription.service';
 import { issueInviteLink } from './invite.service';
-import { notifyAccessGranted } from './notify.service';
+import { notifyAccessGranted, notifyAdmins } from './notify.service';
 
 const log = createLogger('payments');
 
 /** A stale lock is reclaimed after this long, in case a worker died mid-fulfilment. */
 const FULFILMENT_LOCK_MS = 2 * 60 * 1000;
+/**
+ * A checkout nobody completes stays "pending" forever and would be re-checked
+ * on every sweep. After this long it is written off, which keeps the sweep
+ * cheap. A late payment is still honoured: the webhook, or the subscriber
+ * opening /status, verifies it regardless of the stored status.
+ */
+const ABANDON_PENDING_AFTER_MS = 6 * 60 * 60 * 1000;
+
 /** Absorbs sub-kobo rounding when converting gateway major units back to minor. */
 const AMOUNT_TOLERANCE_MINOR = 1;
 
@@ -162,7 +170,16 @@ export async function finalizePayment(
     trigger: options.trigger,
   });
 
+  await Payment.updateOne({ _id: payment._id }, { $set: { lastVerifiedAt: new Date() } });
+
   if (verification.status === 'pending') {
+    // Old enough that the customer has clearly walked away from the checkout.
+    if (payment.status === 'pending' && Date.now() - payment.createdAt.getTime() > ABANDON_PENDING_AFTER_MS) {
+      await Payment.updateOne(
+        { _id: payment._id, status: 'pending' },
+        { $set: { status: 'abandoned', failureReason: 'Checkout was never completed' } },
+      );
+    }
     return { outcome: 'pending', payment };
   }
 
@@ -313,8 +330,15 @@ async function fulfilPayment(payment: IPayment): Promise<{
   return { payment, subscription, inviteLink, isRenewal };
 }
 
-/** How far back to look for a checkout a subscriber may have completed silently. */
-const PENDING_LOOKBACK_MS = 12 * 60 * 60 * 1000;
+/**
+ * How far back to look for a checkout a subscriber may have completed silently.
+ *
+ * Generous on purpose: a bank transfer can clear long after someone closes the
+ * bot, and if the webhook is ever missed this is what rescues them. Twelve
+ * hours once left a real payment unfulfilled because the subscriber next
+ * opened the bot three days later.
+ */
+const PENDING_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Re-checks one subscriber's own recent payments, on demand.
@@ -341,20 +365,90 @@ export async function reconcileUserPayments(telegramId: number): Promise<Finaliz
     }
   }
 
-  const recentPending = await Payment.findOne({
+  // `abandoned` is included: it only means we gave up waiting, not that the
+  // money never arrived.
+  const candidates = await Payment.find({
     telegramId,
-    status: 'pending',
+    status: { $in: ['pending', 'abandoned'] },
     createdAt: { $gte: new Date(Date.now() - PENDING_LOOKBACK_MS) },
-  }).sort({ createdAt: -1 });
+  })
+    .sort({ createdAt: -1 })
+    .limit(3);
 
-  if (!recentPending) return null;
-
-  try {
-    return await finalizePayment(recentPending.reference, { trigger: 'self-heal' });
-  } catch (error) {
-    log.error('On-demand verification failed', { reference: recentPending.reference, error });
-    return null;
+  for (const candidate of candidates) {
+    try {
+      const result = await finalizePayment(candidate.reference, { trigger: 'self-heal' });
+      if (result.outcome === 'fulfilled' || result.outcome === 'already_fulfilled') return result;
+    } catch (error) {
+      log.error('On-demand verification failed', { reference: candidate.reference, error });
+    }
   }
+
+  return null;
+}
+
+export interface PendingSweepReport {
+  checked: number;
+  rescued: number;
+  abandoned: number;
+}
+
+/**
+ * Re-asks the gateway about payments still waiting on an answer.
+ *
+ * This is the safety net for a webhook that never arrives — a misconfigured
+ * webhook URL, a deploy during the callback, or a gateway outage. Without it a
+ * real payment can sit unfulfilled indefinitely, which is exactly what happened
+ * to a bank transfer whose webhook never reached us: Paystack said "success",
+ * our record said "pending", and nothing ever asked again.
+ */
+export async function reconcilePendingPayments(
+  options: { maxAgeMs?: number; limit?: number; minIntervalMs?: number } = {},
+): Promise<PendingSweepReport> {
+  const { maxAgeMs = PENDING_LOOKBACK_MS, limit = 20, minIntervalMs = 10 * 60 * 1000 } = options;
+  const now = Date.now();
+
+  const candidates = await Payment.find({
+    status: 'pending',
+    createdAt: { $gte: new Date(now - maxAgeMs) },
+    $or: [{ lastVerifiedAt: null }, { lastVerifiedAt: { $lte: new Date(now - minIntervalMs) } }],
+  })
+    .sort({ createdAt: 1 })
+    .limit(limit);
+
+  const report: PendingSweepReport = { checked: 0, rescued: 0, abandoned: 0 };
+
+  for (const payment of candidates) {
+    report.checked += 1;
+    try {
+      const result = await finalizePayment(payment.reference, { trigger: 'pending-sweep' });
+      if (result.outcome === 'fulfilled') {
+        report.rescued += 1;
+        log.warn('Rescued a paid-but-unfulfilled payment; the webhook did not arrive', {
+          reference: payment.reference,
+          telegramId: payment.telegramId,
+        });
+        await notifyAdmins(
+          [
+            '\u26A0\uFE0F <b>A payment was rescued, not delivered by webhook</b>',
+            '',
+            `Reference: <code>${payment.reference}</code>`,
+            `Member: <code>${payment.telegramId}</code>`,
+            '',
+            'Access has been granted. Check that the Paystack webhook URL is set for the <b>live</b> keys:',
+            '<code>/api/webhooks/paystack</code>',
+          ].join('\n'),
+        );
+      } else if (result.outcome === 'failed') {
+        report.abandoned += 1;
+      }
+    } catch (error) {
+      log.error('Pending sweep failed for a payment', { reference: payment.reference, error });
+    }
+  }
+
+  if (report.checked > 0) log.info('Pending payment sweep complete', report);
+  return report;
 }
 
 /**

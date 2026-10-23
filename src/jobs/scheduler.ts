@@ -3,7 +3,7 @@ import { createLogger } from '../utils/logger';
 import { connectToDatabase } from '../db/connect';
 import { processReminders, type ReminderReport } from './reminders';
 import { processExpirations, type ExpiryReport } from './expiry';
-import { reconcileUnfulfilledPayments } from '../services/payment.service';
+import { reconcilePendingPayments, reconcileUnfulfilledPayments, type PendingSweepReport } from '../services/payment.service';
 import { expireStaleLinks } from '../services/invite.service';
 import { processBroadcastQueue, type BroadcastPassReport } from '../services/broadcast.service';
 
@@ -18,6 +18,7 @@ export interface SchedulerReport {
   reminders: ReminderReport;
   expiry: ExpiryReport;
   reconciledPayments: number;
+  pendingSweep: PendingSweepReport;
   staleLinksExpired: number;
   broadcast: BroadcastPassReport;
   /** True when something was left unfinished and a follow-up pass is warranted. */
@@ -41,6 +42,7 @@ function emptyReport(startedAt: Date, errors: string[]): SchedulerReport {
     reminders: { considered: 0, sent: 0, skipped: 0, failed: 0, remaining: 0, byKey: { d7: 0, d3: 0, h24: 0 } },
     expiry: { due: 0, removed: 0, removalFailed: 0, notified: 0, remaining: 0 },
     reconciledPayments: 0,
+    pendingSweep: { checked: 0, rescued: 0, abandoned: 0 },
     staleLinksExpired: 0,
     broadcast: { processed: 0, sent: 0, failed: 0, remaining: 0, activeJobs: 0 },
     hasMoreWork: false,
@@ -92,6 +94,10 @@ export async function runScheduledWork(options: SchedulerOptions = {}): Promise<
       ['reconcile', async () => {
         report.reconciledPayments = await reconcileUnfulfilledPayments();
       }],
+      // Catches payments the gateway never told us about.
+      ['pending-payments', async () => {
+        report.pendingSweep = await reconcilePendingPayments();
+      }],
       ['stale-links', async () => {
         report.staleLinksExpired = await expireStaleLinks();
       }],
@@ -138,6 +144,7 @@ export async function runScheduledWork(options: SchedulerOptions = {}): Promise<
   log.info('Scheduler pass finished', {
     durationMs: report.durationMs,
     remindersSent: report.reminders.sent,
+    paymentsRescued: report.pendingSweep.rescued,
     removed: report.expiry.removed,
     broadcastSent: report.broadcast.sent,
     hasMoreWork: report.hasMoreWork,

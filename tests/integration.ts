@@ -129,7 +129,7 @@ async function main(): Promise<void> {
   const { Plan, Payment, Subscription, InviteLink, User, Broadcast, BroadcastTarget } = models;
   const { getApi } = await import('../src/services/telegram');
   const { upsertUser } = await import('../src/services/user.service');
-  const { initiatePayment, finalizePayment, reconcileUnfulfilledPayments, reconcileUserPayments } =
+  const { initiatePayment, finalizePayment, reconcileUnfulfilledPayments, reconcileUserPayments, reconcilePendingPayments } =
     await import('../src/services/payment.service');
   const { activateOrExtend, snapshotFromPlan, getActiveSubscription } = await import('../src/services/subscription.service');
   const { issueInviteLink, findUsableLink } = await import('../src/services/invite.service');
@@ -1252,6 +1252,101 @@ async function main(): Promise<void> {
     const result = await finalizePayment(payment.reference, { trigger: 'button' });
     assert.equal(result.outcome, 'failed');
     assert.equal(result.reason, 'Declined');
+  });
+
+  section('A webhook that never arrives');
+
+  await check('a paid bank transfer with no webhook is rescued by the sweep', async () => {
+    // The real incident: Paystack said success, our record said pending, and
+    // nothing ever asked again. The subscriber paid and got nothing.
+    const payer = await upsertUser({ id: 990001, first_name: 'Transfer' });
+    const plan = (await Plan.findById(monthly._id))!;
+    const { payment } = await initiatePayment({ user: payer, plan, gateway: 'paystack', email: 't@example.com' });
+
+    // Money arrives at the bank, but no webhook reaches us.
+    script.paystackVerify = (reference) => ({
+      status: true,
+      data: {
+        id: 6677202811, status: 'success', reference, channel: 'bank_transfer',
+        // Paystack reports the amount actually received, fees included.
+        amount: plan.priceMinor + 55_838, currency: 'NGN', paid_at: new Date().toISOString(),
+      },
+    });
+
+    assert.equal((await Payment.findById(payment._id))!.status, 'pending');
+    assert.equal(await Subscription.countDocuments({ telegramId: 990001 }), 0);
+
+    const sweep = await reconcilePendingPayments();
+    assert.ok(sweep.rescued >= 1, 'the sweep must rescue it');
+
+    const settled = await Payment.findById(payment._id);
+    assert.equal(settled!.status, 'success');
+    assert.ok(settled!.fulfilledAt, 'and fulfil it');
+    assert.equal(await Subscription.countDocuments({ telegramId: 990001, status: 'active' }), 1);
+    assert.ok(await findUsableLink(990001), 'with an invite link');
+  });
+
+  await check('the sweep never grants the same payment twice', async () => {
+    const before = await Subscription.countDocuments({ telegramId: 990001 });
+    await reconcilePendingPayments();
+    await reconcilePendingPayments();
+    assert.equal(await Subscription.countDocuments({ telegramId: 990001 }), before);
+  });
+
+  await check('a subscriber returning days later is rescued the moment they ask', async () => {
+    const payer = await upsertUser({ id: 990002, first_name: 'ThreeDaysLater' });
+    const plan = (await Plan.findById(monthly._id))!;
+    const { payment } = await initiatePayment({ user: payer, plan, gateway: 'paystack', email: 'l@example.com' });
+
+    // Backdate it three days — the old 12-hour lookback would have missed this.
+    // Via the raw collection: Mongoose makes `createdAt` immutable, so a normal
+    // update is silently ignored and the test would prove nothing.
+    await Payment.collection.updateOne(
+      { _id: payment._id as never },
+      { $set: { createdAt: new Date(Date.now() - 3 * DAY) } },
+    );
+    script.paystackVerify = (reference) => ({
+      status: true,
+      data: { id: 777001, status: 'success', reference, amount: plan.priceMinor, currency: 'NGN' },
+    });
+
+    const result = await reconcileUserPayments(990002);
+    assert.equal(result?.outcome, 'fulfilled');
+    assert.equal(await Subscription.countDocuments({ telegramId: 990002, status: 'active' }), 1);
+  });
+
+  await check('an abandoned checkout is written off, and stops being re-checked', async () => {
+    const browser = await upsertUser({ id: 990003, first_name: 'Abandoner' });
+    const plan = (await Plan.findById(monthly._id))!;
+    const { payment } = await initiatePayment({ user: browser, plan, gateway: 'paystack', email: 'a@example.com' });
+    await Payment.collection.updateOne(
+      { _id: payment._id as never },
+      { $set: { createdAt: new Date(Date.now() - 7 * 60 * 60 * 1000) } },
+    );
+
+    script.paystackVerify = (reference) => ({
+      status: true,
+      data: { id: 777002, status: 'abandoned', reference, amount: plan.priceMinor, currency: 'NGN' },
+    });
+
+    await finalizePayment(payment.reference, { trigger: 'test' });
+    assert.equal((await Payment.findById(payment._id))!.status, 'abandoned');
+    assert.equal(await Subscription.countDocuments({ telegramId: 990003 }), 0, 'and grants nothing');
+
+    const sweep = await reconcilePendingPayments();
+    assert.equal(sweep.checked, 0, 'a written-off checkout is not swept again');
+  });
+
+  await check('someone who pays after we wrote the checkout off still gets access', async () => {
+    const plan = (await Plan.findById(monthly._id))!;
+    const stale = await Payment.findOne({ telegramId: 990003 });
+    script.paystackVerify = (reference) => ({
+      status: true,
+      data: { id: 777003, status: 'success', reference, amount: plan.priceMinor, currency: 'NGN' },
+    });
+    const result = await reconcileUserPayments(990003);
+    assert.equal(result?.outcome, 'fulfilled', `late payment on ${stale!.reference} must still be honoured`);
+    assert.equal(await Subscription.countDocuments({ telegramId: 990003, status: 'active' }), 1);
   });
 
   section('Choosing where to post');

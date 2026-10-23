@@ -26,6 +26,8 @@ export interface IPayment extends Document {
   fulfilledAt?: Date;
   /** Short-lived lock so two webhooks can never fulfil the same payment twice. */
   fulfilmentLock?: Date;
+  /** When the gateway was last asked about this payment. Paces the sweep. */
+  lastVerifiedAt?: Date;
   subscription?: Types.ObjectId;
   failureReason?: string;
   verificationPayload?: unknown;
@@ -54,6 +56,7 @@ const paymentSchema = new Schema<IPayment>(
     channel: { type: String },
     fulfilledAt: { type: Date, default: null },
     fulfilmentLock: { type: Date, default: null },
+    lastVerifiedAt: { type: Date, default: null },
     subscription: { type: Schema.Types.ObjectId, ref: 'Subscription' },
     failureReason: { type: String },
     verificationPayload: { type: Schema.Types.Mixed },
@@ -63,6 +66,7 @@ const paymentSchema = new Schema<IPayment>(
 
 paymentSchema.index({ createdAt: -1 });
 paymentSchema.index({ status: 1, fulfilledAt: 1 });
+paymentSchema.index({ status: 1, createdAt: 1, lastVerifiedAt: 1 });
 
 export const Payment: Model<IPayment> =
   (mongoose.models.Payment as Model<IPayment>) ?? mongoose.model<IPayment>('Payment', paymentSchema);
