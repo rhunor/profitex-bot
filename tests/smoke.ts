@@ -247,7 +247,7 @@ async function main(): Promise<void> {
   console.log('\nIgnoring group chatter');
   const { isIgnorableUpdate } = await import('../src/bot/middlewares');
   const PAID = -1001234567890;
-  const SOURCE_GROUP = { id: -1002182527223, type: 'supergroup' };
+  const SOURCE_GROUP = { id: -1009990001234, type: 'supergroup' };
   const ignorable = (chat: unknown, update: Record<string, unknown>) =>
     isIgnorableUpdate({ chat, update } as never, PAID);
 
@@ -345,12 +345,12 @@ async function main(): Promise<void> {
   await check('cutting text never splits a character in half', () => {
     // Telegram answers "strings must be encoded in UTF-8" and rejects the whole
     // request if half a surrogate pair reaches it. These are real member names
-    // that stopped invite links being created in production.
+    // shaped like the ones that stopped invite links being created in production.
     const realNames = [
-      'Godwin Rosemary \u{1F408}‍⬛\u{1F345} Chinaza \u{1F408}‍⬛',
-      'Adeniyioluwatosin \u{1F345}\u{1F434}\u{1F469}‍\u{1F4BB}\u{1F410}\u{1F986}\u{1F331}SEED\u{1F40D} Oluwatosin',
-      'Nwonumaru Okechukwu Destiny\u{1F345}\u{1F345}\u{1F410}',
-      '\u{1F345}\u{1F331} $X \u{1F47E} BITS Ⓜ️ MEMES \u{1F43E} \u{1F345} \u{1F356} Meshchain.Ai \u{1F199} UXUY',
+      'Adaeze Chinwe Nkechi Okonkwo xx\u{1F408}\u200D\u2B1B Lagos',
+      'Oluwaseun Temitope Adebayoxx xx\u{1F345}\u{1F410} FX',
+      'Babatunde Chukwuemeka Olamidexx\u{1F410}',
+      'Zainab Musa Abubakar Signals xx\u{1F47E}\u{1F199} VIP',
     ];
     const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 

@@ -178,7 +178,7 @@ async function main(): Promise<void> {
           result: {
             id,
             type: id === -1001234567890 ? 'channel' : 'supergroup',
-            title: id === -1001234567890 ? 'PFT VIP Signals.' : 'Profitable FX Trading Academy',
+            title: id === -1001234567890 ? 'Paid Signals Channel' : 'Partner Community',
           },
         } as never;
       }
@@ -1033,8 +1033,8 @@ async function main(): Promise<void> {
   const bigInt = (await import('big-integer')).default;
   const { AppSetting } = await import('../src/models/AppSetting');
 
-  const GROUP = -1002182527223;
-  const GROUP_ID = bigInt('2182527223');
+  const GROUP = -1009990001234;
+  const GROUP_ID = bigInt('9990001234');
   const REAL_HASH = bigInt('987654321');
   const calls: string[] = [];
 
@@ -1049,7 +1049,7 @@ async function main(): Promise<void> {
       calls.push(request.className);
       if (request.className === 'channels.GetChannels') {
         return {
-          chats: [new Api.Channel({ id: GROUP_ID, accessHash: this.channelHash, title: 'Profitable FX Trading Academy',
+          chats: [new Api.Channel({ id: GROUP_ID, accessHash: this.channelHash, title: 'Partner Community',
             photo: new Api.ChatPhotoEmpty(), date: 0, min: this.minChannel })],
         };
       }
@@ -1081,7 +1081,7 @@ async function main(): Promise<void> {
   await check('the remembered access hash belongs to this bot only', async () => {
     // Access hashes differ per Telegram account; a different bot must never reuse them.
     const keys = (await AppSetting.find({}).lean()).map((doc) => doc.key);
-    assert.ok(keys.includes('mtproto_channel_hash:1234567890:-1002182527223'), `stored under: ${keys.join(', ')}`);
+    assert.ok(keys.includes('mtproto_channel_hash:1234567890:-1009990001234'), `stored under: ${keys.join(', ')}`);
   });
 
   await check('the access hash is remembered, so later lookups skip that step', async () => {
@@ -1356,9 +1356,9 @@ async function main(): Promise<void> {
   section('Members with emoji in their names');
 
   await check('an emoji name still gets an invite link, and a valid one', async () => {
-    // "Godwin Rosemary 🐈‍⬛🍅 Chinaza 🐈‍⬛" could not be given a link at all:
+    // A name like this could not be given a link at all:
     // the 32-character cut split an emoji and Telegram rejected the request.
-    const user = await upsertUser({ id: 991001, first_name: 'Godwin Rosemary \u{1F408}‍⬛\u{1F345} Chinaza \u{1F408}‍⬛' });
+    const user = await upsertUser({ id: 991001, first_name: 'Adaeze Chinwe Nkechi Okonkwo xx\u{1F408}\u200D\u2B1B Lagos' });
     const { subscription } = await activateOrExtend({
       user,
       planSnapshot: snapshotFromPlan((await Plan.findById(monthly._id))!),
@@ -1377,9 +1377,9 @@ async function main(): Promise<void> {
 
   await check('every real member name that broke production now works', async () => {
     const names = [
-      'Adeniyioluwatosin \u{1F345}\u{1F434}\u{1F469}‍\u{1F4BB}\u{1F410}\u{1F986}\u{1F331}SEED\u{1F40D} Oluwatosin',
-      'Nwonumaru Okechukwu Destiny\u{1F345}\u{1F345}\u{1F410}',
-      '\u{1F345}\u{1F331} $X \u{1F47E} BITS Ⓜ️ MEMES \u{1F43E} \u{1F345} \u{1F356} Meshchain.Ai \u{1F199} UXUY',
+      'Oluwaseun Temitope Adebayoxx xx\u{1F345}\u{1F410} FX',
+      'Babatunde Chukwuemeka Olamidexx\u{1F410}',
+      'Zainab Musa Abubakar Signals xx\u{1F47E}\u{1F199} VIP',
     ];
     const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
@@ -1453,11 +1453,11 @@ async function main(): Promise<void> {
     const source = postable.find((c) => c.chatId === -1009999999999);
 
     assert.ok(paid, 'the paid channel must be offered');
-    assert.equal(paid!.title, 'PFT VIP Signals.');
+    assert.equal(paid!.title, 'Paid Signals Channel');
     assert.equal(paid!.role, 'paid');
 
     assert.ok(source, 'the other chat must be offered too');
-    assert.equal(source!.title, 'Profitable FX Trading Academy');
+    assert.equal(source!.title, 'Partner Community');
     assert.equal(source!.role, 'trial-source');
   });
 
