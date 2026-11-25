@@ -3,6 +3,7 @@ import type { ChatInviteLink, Message, ChatMember } from 'grammy/types';
 import { getEnv } from '../config/env';
 import { createLogger } from '../utils/logger';
 import { sleep } from '../utils/time';
+import { sliceCharacters, stripLoneSurrogates } from '../utils/text';
 
 const log = createLogger('telegram');
 
@@ -149,17 +150,35 @@ export async function copyToGroup(fromChatId: number, messageId: number): Promis
  * Creates a single-use, time-limited invite link for one subscriber.
  * `member_limit: 1` is what makes the link useless once it has admitted someone.
  */
-export async function createSingleUseInviteLink(name: string, expiresAt: Date): Promise<ChatInviteLink> {
+export async function createSingleUseInviteLink(
+  name: string,
+  expiresAt: Date,
+  fallbackName = 'subscriber',
+): Promise<ChatInviteLink> {
   const env = getEnv();
-  return callWithRetry(
-    () =>
-      getApi().createChatInviteLink(env.GROUP_CHAT_ID, {
-        name: name.slice(0, 32),
-        member_limit: 1,
-        expire_date: Math.floor(expiresAt.getTime() / 1000),
-      }),
-    'createChatInviteLink',
-  );
+
+  const create = (label: string) =>
+    callWithRetry(
+      () =>
+        getApi().createChatInviteLink(env.GROUP_CHAT_ID, {
+          // Cut by characters, never UTF-16 units: half an emoji makes Telegram
+          // reject the whole request with "strings must be encoded in UTF-8".
+          name: stripLoneSurrogates(sliceCharacters(label, 32)),
+          member_limit: 1,
+          expire_date: Math.floor(expiresAt.getTime() / 1000),
+        }),
+      'createChatInviteLink',
+    );
+
+  try {
+    return await create(name);
+  } catch (error) {
+    // The label is decoration; access is not. If Telegram dislikes the name for
+    // any reason, retry with a plain one rather than deny someone their link.
+    const description = error instanceof GrammyError ? error.description : String(error);
+    log.warn('Invite link name rejected; retrying with a plain label', { name, description });
+    return create(fallbackName);
+  }
 }
 
 export async function revokeInviteLink(inviteLink: string): Promise<boolean> {

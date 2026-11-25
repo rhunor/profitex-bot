@@ -37,7 +37,14 @@ import { getEnv } from '../src/config/env';
 import { formatMoney, parseAmountToMinor, toMajor, toMinor } from '../src/utils/money';
 import { addDays, humaniseRemaining, DAY, HOUR } from '../src/utils/time';
 import { buildPaymentReference } from '../src/utils/reference';
-import { chunkMessage, escapeHtml, isValidEmail } from '../src/utils/text';
+import {
+  chunkMessage,
+  escapeHtml,
+  isValidEmail,
+  sliceCharacters,
+  stripLoneSurrogates,
+  truncate,
+} from '../src/utils/text';
 import { paystackGateway } from '../src/services/payments/paystack';
 import { flutterwaveGateway } from '../src/services/payments/flutterwave';
 import { enabledGateways } from '../src/services/payments';
@@ -335,6 +342,34 @@ async function main(): Promise<void> {
     assert.equal(isValidEmail('nope@nope'), false);
     assert.equal(isValidEmail('no-at-sign.com'), false);
   });
+  await check('cutting text never splits a character in half', () => {
+    // Telegram answers "strings must be encoded in UTF-8" and rejects the whole
+    // request if half a surrogate pair reaches it. These are real member names
+    // that stopped invite links being created in production.
+    const realNames = [
+      'Godwin Rosemary \u{1F408}‍⬛\u{1F345} Chinaza \u{1F408}‍⬛',
+      'Adeniyioluwatosin \u{1F345}\u{1F434}\u{1F469}‍\u{1F4BB}\u{1F410}\u{1F986}\u{1F331}SEED\u{1F40D} Oluwatosin',
+      'Nwonumaru Okechukwu Destiny\u{1F345}\u{1F345}\u{1F410}',
+      '\u{1F345}\u{1F331} $X \u{1F47E} BITS Ⓜ️ MEMES \u{1F43E} \u{1F345} \u{1F356} Meshchain.Ai \u{1F199} UXUY',
+    ];
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+    for (const name of realNames) {
+      // The old code did exactly this, and produced a broken string.
+      assert.match(`${name} ABCD`.slice(0, 32), lone, 'this name must be one that used to break');
+
+      const safe = stripLoneSurrogates(`${sliceCharacters(name, 26)} ABCD`);
+      assert.doesNotMatch(safe, lone, `still broken for ${name}`);
+      assert.ok(Array.from(safe).length <= 32, 'and must fit the 32-character limit');
+    }
+  });
+
+  await check('truncate keeps emoji whole at every length', () => {
+    const value = `${'a'.repeat(10)}\u{1F989}\u{1F989}\u{1F989}`;
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    for (let max = 2; max <= 16; max += 1) assert.doesNotMatch(truncate(value, max), lone, `broken at max=${max}`);
+  });
+
   await check('splits messages under the Telegram limit', () => {
     const chunks = chunkMessage('line\n'.repeat(2000));
     assert.ok(chunks.length > 1);

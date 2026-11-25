@@ -3,7 +3,7 @@ import { getEnv } from '../config/env';
 import { createLogger } from '../utils/logger';
 import { addMinutes } from '../utils/time';
 import { randomToken } from '../utils/reference';
-import { displayName } from '../utils/text';
+import { displayName, sliceCharacters, stripLoneSurrogates } from '../utils/text';
 import { InviteLink, recordActivity, type IInviteLink, type IPayment, type ISubscription, type IUser } from '../models';
 import { createSingleUseInviteLink, revokeInviteLink } from './telegram';
 
@@ -54,14 +54,20 @@ export async function issueInviteLink(input: IssueInviteInput): Promise<IInviteL
   const ttlExpiry = addMinutes(new Date(), env.INVITE_LINK_TTL_MINUTES);
   const expiresAt = ttlExpiry > subscription.expiresAt ? subscription.expiresAt : ttlExpiry;
 
-  const label = `${displayName({
-    firstName: user.firstName,
-    lastName: user.lastName,
-    username: user.username,
-    telegramId: user.telegramId,
-  })} ${randomToken(4)}`.slice(0, 32);
+  // Trim the name first so the random suffix always survives the 32-character
+  // limit, and cut by characters so an emoji is never split in half.
+  const who = sliceCharacters(
+    displayName({
+      firstName: user.firstName,
+      lastName: user.lastName,
+      username: user.username,
+      telegramId: user.telegramId,
+    }),
+    26,
+  );
+  const label = stripLoneSurrogates(`${who} ${randomToken(4)}`);
 
-  const created = await createSingleUseInviteLink(label, expiresAt);
+  const created = await createSingleUseInviteLink(label, expiresAt, `sub ${user.telegramId}`);
 
   const record = await InviteLink.create({
     user: user._id as Types.ObjectId,

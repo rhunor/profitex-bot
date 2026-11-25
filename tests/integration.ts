@@ -9,6 +9,7 @@
  */
 import assert from 'node:assert/strict';
 import { MongoMemoryServer } from 'mongodb-memory-server';
+import { GrammyError } from 'grammy';
 
 let passed = 0;
 let failed = 0;
@@ -36,6 +37,8 @@ interface TelegramCall {
 }
 
 const telegramCalls: TelegramCall[] = [];
+/** Lets a test make one Telegram call fail. */
+const telegramStub: { onCreateInviteLink?: () => void } = {};
 let inviteCounter = 0;
 let messageCounter = 0;
 
@@ -147,6 +150,7 @@ async function main(): Promise<void> {
       case 'getMe':
         return { ok: true, result: { id: 1, is_bot: true, first_name: 'Profitex', username: 'profitex_test_bot' } } as never;
       case 'createChatInviteLink':
+        telegramStub.onCreateInviteLink?.();
         inviteCounter += 1;
         return {
           ok: true,
@@ -1347,6 +1351,70 @@ async function main(): Promise<void> {
     const result = await reconcileUserPayments(990003);
     assert.equal(result?.outcome, 'fulfilled', `late payment on ${stale!.reference} must still be honoured`);
     assert.equal(await Subscription.countDocuments({ telegramId: 990003, status: 'active' }), 1);
+  });
+
+  section('Members with emoji in their names');
+
+  await check('an emoji name still gets an invite link, and a valid one', async () => {
+    // "Godwin Rosemary 🐈‍⬛🍅 Chinaza 🐈‍⬛" could not be given a link at all:
+    // the 32-character cut split an emoji and Telegram rejected the request.
+    const user = await upsertUser({ id: 991001, first_name: 'Godwin Rosemary \u{1F408}‍⬛\u{1F345} Chinaza \u{1F408}‍⬛' });
+    const { subscription } = await activateOrExtend({
+      user,
+      planSnapshot: snapshotFromPlan((await Plan.findById(monthly._id))!),
+      source: 'manual',
+    });
+
+    const link = await issueInviteLink({ user, subscription });
+    assert.ok(link, 'a link must be issued');
+
+    const sent = callsTo('createChatInviteLink').at(-1)!;
+    const label = String(sent.payload.name);
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    assert.doesNotMatch(label, lone, `half a character reached Telegram: ${JSON.stringify(label)}`);
+    assert.ok(Array.from(label).length <= 32, 'and it must fit the 32-character limit');
+  });
+
+  await check('every real member name that broke production now works', async () => {
+    const names = [
+      'Adeniyioluwatosin \u{1F345}\u{1F434}\u{1F469}‍\u{1F4BB}\u{1F410}\u{1F986}\u{1F331}SEED\u{1F40D} Oluwatosin',
+      'Nwonumaru Okechukwu Destiny\u{1F345}\u{1F345}\u{1F410}',
+      '\u{1F345}\u{1F331} $X \u{1F47E} BITS Ⓜ️ MEMES \u{1F43E} \u{1F345} \u{1F356} Meshchain.Ai \u{1F199} UXUY',
+    ];
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+    for (const [index, first_name] of names.entries()) {
+      const user = await upsertUser({ id: 991100 + index, first_name });
+      const { subscription } = await activateOrExtend({
+        user,
+        planSnapshot: snapshotFromPlan((await Plan.findById(monthly._id))!),
+        source: 'manual',
+      });
+      assert.ok(await issueInviteLink({ user, subscription }), `no link for ${first_name}`);
+      assert.doesNotMatch(String(callsTo('createChatInviteLink').at(-1)!.payload.name), lone);
+    }
+  });
+
+  await check('a name Telegram refuses falls back to a plain label, never no link', async () => {
+    // Belt and braces: whatever Telegram dislikes about a label, the member
+    // must still get their link.
+    const { createSingleUseInviteLink } = await import('../src/services/telegram');
+    let attempts = 0;
+    const realInvoke = telegramStub.onCreateInviteLink;
+    telegramStub.onCreateInviteLink = () => {
+      attempts += 1;
+      if (attempts === 1) throw new GrammyError('Bad Request: strings must be encoded in UTF-8',
+        { ok: false, error_code: 400, description: 'Bad Request: strings must be encoded in UTF-8' } as never,
+        'createChatInviteLink', {} as never);
+      return undefined;
+    };
+
+    const link = await createSingleUseInviteLink('whatever Telegram dislikes', new Date(Date.now() + 3600_000), 'sub 12345');
+    assert.ok(link.invite_link, 'the fallback must still produce a link');
+    assert.equal(attempts, 2, 'it should retry exactly once');
+    assert.equal(String(callsTo('createChatInviteLink').at(-1)!.payload.name), 'sub 12345');
+
+    telegramStub.onCreateInviteLink = realInvoke;
   });
 
   section('Choosing where to post');

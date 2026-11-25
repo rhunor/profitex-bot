@@ -7,9 +7,30 @@ export function escapeHtml(input: unknown): string {
     .replace(/"/g, '&quot;');
 }
 
+/**
+ * Cuts a string to `max` characters without splitting one in half.
+ *
+ * `String.prototype.slice` counts UTF-16 units, so cutting through an emoji
+ * leaves half of a surrogate pair behind. Telegram rejects any request
+ * containing one with "strings must be encoded in UTF-8" — which stopped
+ * invite links being created for members whose names contained an emoji.
+ */
+export function sliceCharacters(input: string, max: number): string {
+  const characters = Array.from(String(input ?? ''));
+  return characters.length <= max ? characters.join('') : characters.slice(0, max).join('');
+}
+
+/** Removes any half-character left behind by slicing done elsewhere. */
+export function stripLoneSurrogates(input: string): string {
+  return String(input ?? '').replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    '',
+  );
+}
+
 export function truncate(input: string, max = 80): string {
   const value = String(input ?? '');
-  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+  return Array.from(value).length <= max ? value : `${sliceCharacters(value, max - 1)}…`;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
